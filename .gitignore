@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+runs/
+third_party/
+*.log
+*.pid
+*.zip
+*.npz
+*.pt
+*.pth
+*.ckpt

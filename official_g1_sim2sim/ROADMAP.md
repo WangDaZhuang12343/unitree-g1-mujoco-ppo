@@ -1,6 +1,6 @@
 # G1 Navigation Pipeline 开发路线
 
-更新时间：2026-08-05 16:27 CST
+更新时间：2026-08-05 16:40 CST
 
 ## 不可变更的基线
 
@@ -17,7 +17,7 @@
 | `camera/` | 深度相机与可迁移地面分割 | Priority 3 已完成 |
 | `costmap/` | 局部代价地图稳定入口 | 已建立 |
 | `planner/` | DWA 局部规划稳定入口 | 已建立 |
-| `benchmark/` | 批量统计和报告 | Priority 1 已建立 |
+| `benchmark/` | 批量统计、报告和可恢复 Monte Carlo | Priority 4 执行中 |
 | `visualization/` | Pipeline Debug Viewer | Priority 2 已完成 |
 | `logging/` | Priority 5 日志边界说明 | 待扩展 |
 
@@ -44,7 +44,7 @@
 
 1. **Priority 2：Visualization（已完成）**：显示 Depth Image、Point Cloud、Occupancy Costmap、DWA 候选路径、选中路径、Robot Pose 和 Goal。
 2. **Priority 3：Ground Segmentation（已完成）**：使用 RANSAC/Least Square/Gravity Constraint 替换 MuJoCo geom ID，并用相同 Benchmark 做回归。
-3. **Priority 4：Monte Carlo（下一阶段）**：参数化障碍宽度、间距、高度、目标点和随机地图，运行 100 次统计。
+3. **Priority 4：Monte Carlo（执行中）**：参数化障碍宽度、间距、高度、目标点和随机地图，运行 100 次统计。
 4. **Priority 5：Debug Logging**：补齐 Depth FPS、Planning FPS/Time、Control Latency、Velocity、Pose、Goal Error 和 Collision Event 日志。
 5. **Priority 6：Learning-based Navigation**：只替换 Costmap/DWA 到速度的导航层，不替换官方 Walking Policy。
 6. **Priority 7：Isaac Lab**：研究 Height Scan、Terrain Curriculum 和 Navigation Policy，不训练 Walking。
@@ -68,3 +68,13 @@
 - [x] 22 项测试通过，11 场景仍为 8/11 成功、零碰撞。
 - [x] 10 个场景逐帧完全一致；窄通道最大位置差 8.6 毫米，结果不变。
 - [x] Debug Viewer 增加障碍点红色叠加和地面内点率/缓存状态。
+
+## Priority 4 实施状态
+
+- [x] 建立障碍宽度、障碍间距、障碍高度、目标点偏移和随机地图五个等量测试族。
+- [x] 默认 100 次，每组 20 次；`run_id` 和种子唯一且可复现。
+- [x] 每次运行后增量写入 checkpoint，`--resume` 可跳过已完成样本。
+- [x] 输出分组/总体成功率、95% Wilson 置信区间、碰撞和运动指标。
+- [x] 断点续跑烟雾测试通过：先跑2次，恢复后完成剩余3次，无重复。
+- [x] 五组各1次完整试验均成功、零碰撞，总墙钟约2.9分钟。
+- [ ] 正式100次低优先级批次正在执行。

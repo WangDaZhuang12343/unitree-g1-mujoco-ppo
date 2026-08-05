@@ -1,6 +1,6 @@
 # 项目进度
 
-更新时间：2026-08-05 16:27 CST
+更新时间：2026-08-05 16:40 CST
 
 ## 阶段总结
 
@@ -100,7 +100,7 @@ MuJoCo mj_multiRay 深度相机
 - [x] 完成相机→地图→DWA→官方ONNX→MuJoCo端到端闭环。
 - [x] 0.8米宽、15厘米高障碍测试零接触、未跌倒，约14.8秒到达5米目标点0.298米范围。
 - [x] 修正 MuJoCo 几何分组导致的“界面只显示两个移动点”问题，现在完整 G1 模型与障碍物可同时显示。
-- [x] 当前 22 项单元测试、Python 编译检查和端到端回归全部通过。
+- [x] 当前 26 项单元测试、Python 编译检查和端到端回归全部通过。
 
 详细报告位于 `runs/command_benchmark/report.md` 和 `runs/navigation/report.md`。
 
@@ -161,3 +161,13 @@ MuJoCo mj_multiRay 深度相机
 - [x] Debug Viewer 已标红分割后障碍点，并显示地面内点率和缓存降级状态。
 
 详细结果见 `reports/ground_segmentation_report.md`。下一阶段是 Priority 4：参数化场景与 100 次 Monte Carlo。
+
+## Monte Carlo 阶段进度
+
+- [x] 新增 `benchmark_monte_carlo.py`，默认执行100次可复现测试。
+- [x] 五个测试族各20次：障碍宽度、间距、高度、目标偏移、随机地图。
+- [x] 增量保存 `checkpoint.csv`，支持 `--resume` 中断续跑。
+- [x] 报告增加分组成功率、总成功率和 95% Wilson 置信区间。
+- [x] 先2次后3次的断点续跑烟雾测试通过，checkpoint无重复。
+- [x] 五组各1次完整试验全部成功、零碰撞，总耗时约2.9分钟。
+- [ ] 正式100次批次按低优先级执行，阶段报告每次自动刷新。

@@ -81,6 +81,12 @@ python3 benchmark_navigation.py --scenes all --repetitions 1
 python3 benchmark_navigation.py \
   --scenes single_obstacle,double_obstacle,narrow_corridor \
   --duration 2
+
+# 前台低优先级运行100次Monte Carlo，支持中断续跑
+./run_monte_carlo.sh
+
+# 查看正式Monte Carlo进度和阶段成功率
+./monte_carlo_status.sh
 ```
 
 运行时的综合地形报告保存在 `runs/terrain_benchmark/report.md`，Git 中保留的报告快照位于 `reports/terrain_report.md`。
@@ -92,6 +98,8 @@ Navigation Benchmark 模块位于 `navigation/` 和 `benchmark/`。运行后输�
 Debug Viewer 位于 `visualization/`，实时显示 Depth Image、Point Cloud、Occupancy Costmap、DWA 候选/选中路径、机器人位姿和目标。该界面是可选调试消费者，普通 Benchmark 不会生成或复制调试数据。
 
 地面分割位于 `camera/ground_segmentation.py`，使用重力约束 RANSAC 和最小二乘平面精修。导航感知链路已不依赖 MuJoCo geom ID 剔除地面，回归结果见 `reports/ground_segmentation_report.md`。
+
+Monte Carlo 入口是 `benchmark_monte_carlo.py`，默认将 100 次等分为障碍宽度、障碍间距、障碍高度、目标点偏移和随机地图五组。每次完成都会刷新 `checkpoint.csv`、`success_rate.csv` 和中文报告，`--resume` 可安全续跑。
 
 默认是平地测试，避免机器人在起点前方约 1 米处撞上官方场景障碍物。指标保存在 `runs/latest.csv`，仿真窗口关闭后程序会自动结束。
 

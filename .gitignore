@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .env
 runs/
+build/
 third_party/
 *.log
 *.pid

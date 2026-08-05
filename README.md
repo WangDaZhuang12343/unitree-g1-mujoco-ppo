@@ -1,6 +1,39 @@
-# 宇树 G1 MuJoCo CPU PPO 训练
+# 宇树 G1 MuJoCo 强化学习与官方策略验证
 
 基于 MuJoCo、Gymnasium 和 Stable-Baselines3 的宇树 G1 仿真强化学习项目。策略控制双腿 12 个关节和腰部 3 个关节，以 50 Hz 输出位置目标；MuJoCo 物理仿真频率为 500 Hz。
+
+仓库现在包含两条路线：
+
+- 根目录：从零实现的 CPU PPO 教学与实验流程。训练流程完整，但最终策略只学会稳定站立，没有学会有效前向行走。
+- [`official_g1_sim2sim/`](official_g1_sim2sim/)：推荐路线，运行 Unitree RL Lab 官方 G1 29DoF ONNX 策略，并提供平地、横杆、台阶、楼梯、斜坡和随机起伏测试。
+
+## 官方策略验证结果
+
+官方策略在本机 CPU MuJoCo 中完成以下验证：
+
+| 测试 | 结果 |
+|---|---|
+| 平地 0.25～0.70 m/s | 连续运行 20 秒，未跌倒 |
+| 横杆 | 2 cm 稳定通过，4 cm 及以上越过后失稳 |
+| 单台阶 | 2 cm 通过，4 cm 失败 |
+| 连续楼梯 | 1 cm 级高通过，2 cm 失败 |
+| 随机起伏 | 1～2 cm 通过，4 cm 失败 |
+| 上下斜坡 | 5 度未通过，下坡恢复阶段失稳 |
+
+详细结果见[横杆报告](official_g1_sim2sim/reports/obstacle_report.md)和[综合地形报告](official_g1_sim2sim/reports/terrain_report.md)。
+
+快速运行官方策略：
+
+```bash
+# 在本仓库同级目录克隆官方依赖
+git clone https://github.com/unitreerobotics/unitree_rl_lab.git ../unitree_rl_lab
+git clone https://github.com/unitreerobotics/unitree_mujoco.git ../unitree_mujoco
+
+cd official_g1_sim2sim
+python3 -m pip install -r requirements.txt
+./build.sh
+python3 simulate.py --duration 20 --vx 0.45
+```
 
 ## 当前范围
 
@@ -9,6 +42,8 @@
 - 6 个 CPU 并行环境，PPO 网络为 `256 × 256`。
 - 提供独立评估、检查点、中文进度文档和本地网页监控。
 - 仅用于仿真研究，不连接宇树实机控制接口。
+
+以下章节主要说明根目录中的自研 PPO 教学路线。实际行走验证建议使用 `official_g1_sim2sim/`。
 
 ## 安全边界
 

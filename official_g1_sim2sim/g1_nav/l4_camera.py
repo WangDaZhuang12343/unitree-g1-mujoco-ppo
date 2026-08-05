@@ -60,9 +60,9 @@ class SimulatedDepthCamera:
 
     @staticmethod
     def isolate_world_geoms(model: mujoco.MjModel) -> None:
-        """将机器人几何放到射线组5；不改变物理碰撞。"""
+        """将机器人几何放到可见组1，射线只检测世界组0。"""
         robot_geoms = model.geom_bodyid != 0
-        model.geom_group[robot_geoms] = 5
+        model.geom_group[robot_geoms] = 1
 
     def capture(self, model: mujoco.MjModel, data: mujoco.MjData, body_id: int) -> DepthFrame:
         cfg = self.config

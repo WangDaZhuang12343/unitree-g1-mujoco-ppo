@@ -32,6 +32,8 @@ class CameraTest(unittest.TestCase):
 
         camera = SimulatedDepthCamera()
         camera.isolate_world_geoms(model)
+        robot_geoms = model.geom_bodyid != 0
+        self.assertTrue(np.all(model.geom_group[robot_geoms] == 1))
         body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
         bar_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "course_bar")
         frame = camera.capture(model, data, body_id)

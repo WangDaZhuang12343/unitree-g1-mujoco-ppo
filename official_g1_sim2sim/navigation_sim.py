@@ -114,6 +114,7 @@ def main() -> None:
         from mujoco import viewer as mj_viewer
 
         viewer = mj_viewer.launch_passive(model, data)
+        viewer.opt.geomgroup[1] = 1
         viewer.cam.lookat[:] = [1.5, 0.0, 0.7]
         viewer.cam.distance = 4.0
         viewer.cam.azimuth = 135
@@ -182,6 +183,7 @@ def main() -> None:
             if viewer is not None:
                 viewer.cam.lookat[0] = data.qpos[0]
                 viewer.cam.lookat[1] = data.qpos[1]
+                viewer.cam.lookat[2] = max(0.6, data.qpos[2] * 0.65)
                 viewer.sync()
                 deadline = wall_start + data.time
                 if deadline > time.perf_counter():

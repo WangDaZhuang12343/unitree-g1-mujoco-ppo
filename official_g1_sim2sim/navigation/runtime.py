@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 import time
+from typing import Callable
 
 import mujoco
 import numpy as np
@@ -31,6 +32,7 @@ class NavigationRunConfig:
     viewer: bool = False
     realtime: bool = False
     run_id: str = "run_001"
+    debug_callback: Callable[["NavigationDebugFrame"], bool | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,23 @@ class NavigationRunResult:
     average_planning_ms: float
     final_distance_m: float
     output: Path | None
+
+
+@dataclass(frozen=True)
+class NavigationDebugFrame:
+    time_s: float
+    depth: np.ndarray
+    points_body: np.ndarray
+    obstacle_map: np.ndarray
+    distance_field: np.ndarray
+    map_extent: tuple[float, float, float, float]
+    candidate_trajectories: np.ndarray
+    candidate_valid: np.ndarray
+    selected_trajectory: np.ndarray
+    goal_body: tuple[float, float]
+    robot_world_pose: tuple[float, float, float]
+    command: tuple[float, float, float]
+    planning_ms: float
 
 
 def goal_in_body(data: mujoco.MjData, body_id: int, goal_world: np.ndarray) -> tuple[float, float]:
@@ -182,6 +201,7 @@ def run_navigation(
         viewer.cam.elevation = -20
 
     try:
+        debug_running = True
         for step in range(total_steps):
             completed_steps = step + 1
             if scenario.dynamic:
@@ -197,10 +217,38 @@ def run_navigation(
                     frame.points_body[non_ground],
                     ground_z_body=-float(data.xpos[body_id, 2]),
                 )
-                desired_plan = navigator.plan(costmap, goal_in_body(data, body_id, goal_world))
+                goal_body = goal_in_body(data, body_id, goal_world)
+                desired_plan = navigator.plan(
+                    costmap, goal_body, collect_debug=run_config.debug_callback is not None
+                )
                 planning_ms = (time.perf_counter() - planning_start) * 1000.0
                 planning_times.append(planning_ms)
                 perception_frames += 1
+                if run_config.debug_callback is not None:
+                    planning_debug = navigator.last_debug
+                    if planning_debug is None:
+                        raise RuntimeError("调试模式未生成 DWA 候选轨迹")
+                    _, _, debug_yaw = quaternion_euler(data.qpos[3:7])
+                    debug_running = run_config.debug_callback(NavigationDebugFrame(
+                        time_s=float(data.time),
+                        depth=frame.depth.copy(),
+                        points_body=frame.points_body.copy(),
+                        obstacle_map=costmap.obstacle_map.copy(),
+                        distance_field=costmap.distance_field.copy(),
+                        map_extent=(
+                            -costmap.config.rear_range, costmap.config.front_range,
+                            -costmap.config.side_range, costmap.config.side_range,
+                        ),
+                        candidate_trajectories=planning_debug.trajectories.copy(),
+                        candidate_valid=planning_debug.valid.copy(),
+                        selected_trajectory=desired_plan.trajectory.copy(),
+                        goal_body=goal_body,
+                        robot_world_pose=(float(data.qpos[0]), float(data.qpos[1]), debug_yaw),
+                        command=(float(command[0]), float(command[1]), float(command[2])),
+                        planning_ms=planning_ms,
+                    )) is not False
+                    if not debug_running:
+                        break
 
             if step % policy_interval == 0:
                 roll, pitch, yaw = quaternion_euler(data.qpos[3:7])
@@ -246,12 +294,12 @@ def run_navigation(
             if viewer is not None:
                 viewer.cam.lookat[:] = [data.qpos[0], data.qpos[1], max(0.6, data.qpos[2] * 0.65)]
                 viewer.sync()
-                if run_config.realtime:
-                    deadline = wall_start + data.time
-                    if deadline > time.perf_counter():
-                        time.sleep(deadline - time.perf_counter())
                 if not viewer.is_running():
                     break
+            if run_config.realtime:
+                deadline = wall_start + data.time
+                if deadline > time.perf_counter():
+                    time.sleep(deadline - time.perf_counter())
     finally:
         if owns_runner:
             runner.close()

@@ -56,3 +56,10 @@
 - MuJoCo 的 `geom_group` 同时影响射线筛选和 Viewer 显示。
 - 机器人放入默认隐藏的组5时，界面只会剩下关节 site，看起来像“两个点在移动”。
 - 当前做法是机器人使用可见组1，环境使用组0；`mj_multiRay` 只启用组0，从而既不检测机器人自身，又不隐藏机器人模型。
+
+# 2026-08-05 Navigation Debug Viewer
+
+- Pipeline 可视化应该是可选消费者，不应让 Benchmark 默认保留数百条 DWA 候选轨迹。
+- 只有注册 `debug_callback` 时，规划器才收集 331 条候选轨迹，运行时才复制 Depth、Point Cloud 和 Costmap。
+- 局部 Costmap 前向范围是 4 米，但目标可能在 5 米以外；Debug Viewer 显示边界需要单独扩展，否则 Goal 标记会被裁掉。
+- 当前规划耗时约 167～279 ms，Debug Viewer 可直接观察每帧数值；性能优化仍归属 Priority 5，不在本阶段修改 DWA 算法。

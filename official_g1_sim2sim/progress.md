@@ -1,6 +1,6 @@
 # 项目进度
 
-更新时间：2026-08-05 15:35 CST
+更新时间：2026-08-05 15:55 CST
 
 ## 阶段总结
 
@@ -100,7 +100,7 @@ MuJoCo mj_multiRay 深度相机
 - [x] 完成相机→地图→DWA→官方ONNX→MuJoCo端到端闭环。
 - [x] 0.8米宽、15厘米高障碍测试零接触、未跌倒，约14.8秒到达5米目标点0.298米范围。
 - [x] 修正 MuJoCo 几何分组导致的“界面只显示两个移动点”问题，现在完整 G1 模型与障碍物可同时显示。
-- [x] 10 项单元测试、Python 编译检查和短时端到端回归全部通过。
+- [x] 当前 18 项单元测试、Python 编译检查和端到端回归全部通过。
 
 详细报告位于 `runs/command_benchmark/report.md` 和 `runs/navigation/report.md`。
 
@@ -139,3 +139,14 @@ MuJoCo mj_multiRay 深度相机
 - [ ] 当前单次感知+规划耗时约 167～279 ms，尚未满足真机实时要求。
 
 详细路线见 `ROADMAP.md`，首次基线报告见 `runs/navigation_benchmark/navigation_report.md`。
+
+## Navigation Debug Viewer 阶段成果
+
+- [x] 新增 `navigation_debug_viewer.py` 和 `run_navigation_debug_viewer.sh`。
+- [x] 实时显示 64×40 Depth Image、机器人坐标点云和 Occupancy Costmap。
+- [x] 显示 331 条 DWA 候选路径，区分有效/无效轨迹，并突出选中路径。
+- [x] 显示机器人世界位姿、局部目标、速度指令、规划耗时和有效候选数。
+- [x] Debug 数据通过可选回调导出，无界面 Benchmark 不保留候选轨迹，不改变原有算法路径。
+- [x] 18 项单元测试全部通过；无界面生成 1904×1148、404 KiB 实际调试快照通过视觉检查。
+
+下一阶段是 Priority 3：使用可迁移的 Ground Segmentation 替换 MuJoCo geom ID 地面剔除。

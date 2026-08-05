@@ -35,6 +35,28 @@ class NavigationCoreTest(unittest.TestCase):
         self.assertGreater(result.vx, 0.0)
         self.assertGreater(abs(result.omega), 0.01)
 
+    def test_dwa_debug_candidates_are_optional(self):
+        costmap = LocalCostMap()
+        costmap.update(np.empty((0, 3)), ground_z_body=0.0)
+        navigator = DWANavigator()
+        navigator.plan(costmap, (3.0, 0.0))
+        self.assertIsNone(navigator.last_debug)
+        selected = navigator.plan(costmap, (3.0, 0.0), collect_debug=True)
+        self.assertIsNotNone(navigator.last_debug)
+        self.assertEqual(navigator.last_debug.trajectories.shape[0], 331)
+        self.assertEqual(navigator.last_debug.valid.shape, (331,))
+        self.assertTrue(np.any(navigator.last_debug.valid))
+        self.assertGreater(selected.trajectory.shape[0], 1)
+
+    def test_debug_collection_does_not_change_selection(self):
+        costmap = LocalCostMap()
+        costmap.update(np.empty((0, 3)), ground_z_body=0.0)
+        regular = DWANavigator().plan(costmap, (3.0, 0.0))
+        debug = DWANavigator().plan(costmap, (3.0, 0.0), collect_debug=True)
+        self.assertEqual((regular.vx, regular.vy, regular.omega, regular.score),
+                         (debug.vx, debug.vy, debug.omega, debug.score))
+        np.testing.assert_array_equal(regular.trajectory, debug.trajectory)
+
     def test_safety_limits_and_stops(self):
         safety = SafetySystem()
         first = safety.update(1.0, 1.0, 1.0, 0.1, 0.8, 0.0, 0.0)

@@ -1,1 +1,5 @@
-"""Priority 2 调试可视化的包边界。"""
+"""Navigation Pipeline 调试可视化。"""
+
+from .debug_viewer import NavigationDebugViewer
+
+__all__ = ["NavigationDebugViewer"]

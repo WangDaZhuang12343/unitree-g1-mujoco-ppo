@@ -41,10 +41,17 @@ class PlanResult:
     trajectory: np.ndarray
 
 
+@dataclass(frozen=True)
+class PlanningDebug:
+    trajectories: np.ndarray
+    valid: np.ndarray
+
+
 class DWANavigator:
     def __init__(self, config: DWAConfig | None = None) -> None:
         self.config = config or DWAConfig()
         self.previous_omega = 0.0
+        self.last_debug: PlanningDebug | None = None
 
     def _simulate(self, vx: float, vy: float, omega: float) -> np.ndarray:
         steps = int(round(self.config.predict_time / self.config.predict_dt))
@@ -58,7 +65,9 @@ class DWANavigator:
             trajectory[index + 1, 2] = yaw + omega * self.config.omega_response_gain * self.config.predict_dt
         return trajectory
 
-    def plan(self, costmap: LocalCostMap, goal_body: tuple[float, float]) -> PlanResult:
+    def plan(
+        self, costmap: LocalCostMap, goal_body: tuple[float, float], collect_debug: bool = False
+    ) -> PlanResult:
         goal = np.asarray(goal_body, dtype=np.float32)
         candidates = [(0.0, 0.0, 0.0)]
         candidates.extend(
@@ -68,10 +77,16 @@ class DWANavigator:
             for omega in np.linspace(-self.config.max_omega, self.config.max_omega, self.config.omega_samples)
         )
         best = PlanResult(0.0, 0.0, 0.0, -np.inf, np.zeros((1, 3), dtype=np.float32))
+        debug_trajectories: list[np.ndarray] = []
+        debug_valid: list[bool] = []
         for vx, vy, omega in candidates:
             trajectory = self._simulate(vx, vy, omega)
             clearances = np.asarray([costmap.clearance(float(x), float(y)) for x, y in trajectory[:, :2]])
-            if np.any(clearances < self.config.robot_radius):
+            valid = not np.any(clearances < self.config.robot_radius)
+            if collect_debug:
+                debug_trajectories.append(trajectory)
+                debug_valid.append(bool(valid))
+            if not valid:
                 continue
             initial_distance = max(float(np.linalg.norm(goal)), 1e-6)
             trajectory_distances = np.linalg.norm(trajectory[:, :2] - goal, axis=1)
@@ -92,4 +107,11 @@ class DWANavigator:
             if score > best.score:
                 best = PlanResult(vx, vy, omega, score, trajectory)
         self.previous_omega = best.omega
+        if collect_debug:
+            self.last_debug = PlanningDebug(
+                trajectories=np.stack(debug_trajectories),
+                valid=np.asarray(debug_valid, dtype=bool),
+            )
+        else:
+            self.last_debug = None
         return best

@@ -6,7 +6,7 @@ CHECKPOINT="$ROOT/runs/navigation_monte_carlo/checkpoint.csv"
 REPORT="$ROOT/runs/navigation_monte_carlo/navigation_report.md"
 
 if [[ -f "$CHECKPOINT" ]]; then
-  COMPLETED="$(awk 'END { print NR > 0 ? NR - 1 : 0 }' "$CHECKPOINT")"
+  COMPLETED="$(awk 'END { print (NR > 0 ? NR - 1 : 0) }' "$CHECKPOINT")"
 else
   COMPLETED=0
 fi

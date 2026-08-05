@@ -67,11 +67,21 @@ python3 navigation_sim.py --duration 30
 
 # 打开视觉绕障界面
 ./run_navigation_viewer.sh
+
+# 运行全部11个导航场景并生成中文报告
+python3 benchmark_navigation.py --scenes all --repetitions 1
+
+# 快速回归：运行指定场景，每个只跑 2 秒
+python3 benchmark_navigation.py \
+  --scenes single_obstacle,double_obstacle,narrow_corridor \
+  --duration 2
 ```
 
 运行时的综合地形报告保存在 `runs/terrain_benchmark/report.md`，Git 中保留的报告快照位于 `reports/terrain_report.md`。
 
 视觉导航模块位于 `g1_nav/`，包含策略合同、射线深度相机、局部代价地图、DWA和安全层。首次闭环报告位于 `runs/navigation/report.md`，Git 快照位于 `reports/navigation_report.md`。
+
+Navigation Benchmark 模块位于 `navigation/` 和 `benchmark/`。运行后输出位于 `runs/navigation_benchmark/`，Git 中的基线报告快照位于 `reports/navigation_benchmark_report.md`。后续开发顺序见 `ROADMAP.md`。
 
 默认是平地测试，避免机器人在起点前方约 1 米处撞上官方场景障碍物。指标保存在 `runs/latest.csv`，仿真窗口关闭后程序会自动结束。
 

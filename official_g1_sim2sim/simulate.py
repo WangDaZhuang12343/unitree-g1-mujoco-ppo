@@ -220,6 +220,16 @@ def build_model(args: argparse.Namespace) -> mujoco.MjModel:
                 [width / 2.0, 0.90, float(height) / 2.0],
                 [0.42, 0.43 + index * 0.025, 0.22, 1.0],
             )
+
+    for obstacle in getattr(args, "scene_obstacles", ()):
+        if obstacle.height <= 0.0 or obstacle.size_x <= 0.0 or obstacle.size_y <= 0.0:
+            raise ValueError(f"场景障碍物尺寸必须为正数：{obstacle.name}")
+        add_box(
+            obstacle.name,
+            [obstacle.x, obstacle.y, obstacle.height / 2.0],
+            [obstacle.size_x / 2.0, obstacle.size_y / 2.0, obstacle.height / 2.0],
+            list(obstacle.rgba),
+        )
     model = spec.compile()
     model.opt.timestep = 0.002
 

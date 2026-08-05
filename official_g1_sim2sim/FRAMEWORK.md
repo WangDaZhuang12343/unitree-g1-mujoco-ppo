@@ -5,6 +5,7 @@
 > **不做的：** 不重新训练底层 locomotion；不做全栈 sim-to-real locomotion 迁移。
 
 > **2026-08-05 实施校正：** Phase 0 已完成，实际可执行代码位于 `g1_nav/` 和 `navigation_sim.py`。本文后续大段代码是早期设计草案，存在旧API、坐标系和控制链路错误，不得直接复制执行；以测试通过的源码为准。
+> **后续开发：** Navigation Pipeline 的 Priority Roadmap、模块边界和验收门槛统一记录在 `ROADMAP.md`。
 
 ---
 

@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import ctypes
 import csv
-from collections import deque
 import math
 import os
 from pathlib import Path
@@ -15,6 +14,8 @@ import time
 import mujoco
 import numpy as np
 import yaml
+
+from g1_nav.policy_contract import ObservationHistory, PolicyContract
 
 
 ROOT = Path(__file__).resolve().parent
@@ -99,22 +100,6 @@ class OrtRunner:
             self.handle = None
 
 
-class ObservationHistory:
-    def __init__(self, lengths: dict[str, int], initial: dict[str, np.ndarray]) -> None:
-        self.buffers = {
-            name: deque([value.copy() for _ in range(lengths[name])], maxlen=lengths[name])
-            for name, value in initial.items()
-        }
-
-    def append(self, values: dict[str, np.ndarray]) -> None:
-        for name, value in values.items():
-            self.buffers[name].append(value.copy())
-
-    def flatten(self, order: list[str]) -> np.ndarray:
-        # 官方 use_gym_history=false：每个观测项的历史先拼完，再拼下一个观测项。
-        return np.concatenate([frame for name in order for frame in self.buffers[name]]).astype(np.float32)
-
-
 def projected_gravity(quaternion_wxyz: np.ndarray) -> np.ndarray:
     matrix = np.empty(9, dtype=np.float64)
     mujoco.mju_quat2Mat(matrix, quaternion_wxyz)
@@ -144,6 +129,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--obstacle-height", type=float, default=0.04, help="横杆/台阶高度或楼梯级高（米）")
     parser.add_argument("--obstacle-x", type=float, default=1.5, help="地形起点或中心位置 x（米）")
+    parser.add_argument("--obstacle-width", type=float, default=1.8, help="横杆沿Y方向的总宽度（米）")
     parser.add_argument("--slope-angle", type=float, default=5.0, help="斜坡角度（度）")
     parser.add_argument("--roughness", type=float, default=0.02, help="随机起伏最大高度（米）")
     parser.add_argument("--terrain-seed", type=int, default=7, help="随机起伏种子")
@@ -171,11 +157,14 @@ def build_model(args: argparse.Namespace) -> mujoco.MjModel:
     if args.terrain in {"bar", "step", "stairs"} and not 0.0 < args.obstacle_height <= 0.30:
         raise ValueError("障碍高度必须在 0～0.30 米之间")
     if args.terrain == "bar":
+        obstacle_width = float(getattr(args, "obstacle_width", 1.8))
+        if not 0.1 <= obstacle_width <= 4.0:
+            raise ValueError("横杆宽度必须在0.1～4.0米之间")
         spec.worldbody.add_geom(
             name="course_bar",
             type=mujoco.mjtGeom.mjGEOM_BOX,
             pos=[args.obstacle_x, 0.0, args.obstacle_height / 2.0],
-            size=[0.06, 0.9, args.obstacle_height / 2.0],
+            size=[0.06, obstacle_width / 2.0, args.obstacle_height / 2.0],
             rgba=[0.85, 0.22, 0.08, 1.0],
             friction=[1.0, 0.005, 0.0001],
         )
@@ -253,25 +242,14 @@ def main() -> None:
     args = parse_args()
     with CONFIG_PATH.open(encoding="utf-8") as stream:
         config = yaml.safe_load(stream)
+    contract = PolicyContract.from_config(config)
 
-    command_ranges = config["commands"]["base_velocity"]["ranges"]
-    command = np.array(
-        [
-            np.clip(args.vx, *command_ranges["lin_vel_x"]),
-            np.clip(args.vy, *command_ranges["lin_vel_y"]),
-            np.clip(args.yaw, *command_ranges["ang_vel_z"]),
-        ],
-        dtype=np.float32,
-    )
-    joint_map = np.asarray(config["joint_ids_map"], dtype=np.int32)
+    command = contract.clip_command(np.array([args.vx, args.vy, args.yaw], dtype=np.float32))
+    joint_map = contract.joint_map
     default = np.asarray(config["default_joint_pos"], dtype=np.float64)
     stiffness = np.asarray(config["stiffness"], dtype=np.float64)
     damping = np.asarray(config["damping"], dtype=np.float64)
-    action_scale = np.asarray(config["actions"]["JointPositionAction"]["scale"], dtype=np.float64)
-    observation_order = list(config["observations"].keys())
-    history_lengths = {
-        name: int(term.get("history_length", 1)) for name, term in config["observations"].items()
-    }
+    observation_order = list(contract.observation_order)
 
     model = build_model(args)
     data = mujoco.MjData(model)
@@ -300,7 +278,7 @@ def main() -> None:
             for name, value in raw.items()
         }
 
-    history = ObservationHistory(history_lengths, observations())
+    history = ObservationHistory(contract.history_lengths, observations())
     observation = history.flatten(observation_order)
     if observation.size != runner.input_size:
         raise RuntimeError(f"策略输入维度不匹配：模型 {runner.input_size}，观测 {observation.size}")
@@ -331,10 +309,9 @@ def main() -> None:
                 history.append(observations())
                 observation = history.flatten(observation_order)
                 last_action[:] = runner.run(observation)
-                target_policy = last_action.astype(np.float64) * action_scale + default
+                target_policy = contract.process_action(last_action)
 
-            target_motor = np.empty(29, dtype=np.float64)
-            target_motor[joint_map] = target_policy
+            target_motor = contract.policy_to_motor(target_policy)
             torque = stiffness * (target_motor - data.qpos[7:36]) - damping * data.qvel[6:35]
             data.ctrl[:] = np.clip(torque, model.actuator_ctrlrange[:, 0], model.actuator_ctrlrange[:, 1])
             mujoco.mj_step(model, data)

@@ -2,8 +2,6 @@
 
 本目录在 CPU 上运行 Unitree 官方 G1 29DoF 速度策略，用于安全的 MuJoCo Sim2Sim 验证。
 
-已完成的静态测试报告保存在 [`reports/`](reports/)；运行评估后生成的原始 CSV 和最新报告默认写入本地 `runs/`，不提交到 Git。
-
 ## 依赖布局
 
 需要先克隆官方仓库。可以将它们放在本目录上一级或主项目的同级目录：
@@ -63,13 +61,21 @@ python3 simulate.py --terrain ramp --slope-angle 8 --obstacle-x 1.8 --vx 0.45 --
 
 # 一键观看综合地形；下面展示可通过的 2 厘米随机起伏
 ./run_terrain_viewer.sh rough 0.02
+
+# 相机识别障碍并自主绕行到5米目标点
+python3 navigation_sim.py --duration 30
+
+# 打开视觉绕障界面
+./run_navigation_viewer.sh
 ```
 
-综合地形报告保存在 `runs/terrain_benchmark/report.md`。
+运行时的综合地形报告保存在 `runs/terrain_benchmark/report.md`，Git 中保留的报告快照位于 `reports/terrain_report.md`。
+
+视觉导航模块位于 `g1_nav/`，包含策略合同、射线深度相机、局部代价地图、DWA和安全层。首次闭环报告位于 `runs/navigation/report.md`，Git 快照位于 `reports/navigation_report.md`。
 
 默认是平地测试，避免机器人在起点前方约 1 米处撞上官方场景障碍物。指标保存在 `runs/latest.csv`，仿真窗口关闭后程序会自动结束。
 
-障碍分级报告保存在 `runs/obstacle_benchmark/report.md`。当前官方策略没有高度扫描输入，分级测试衡量的是盲走抗扰能力。
+障碍分级报告保存在 `runs/obstacle_benchmark/report.md`，Git 快照位于 `reports/obstacle_report.md`。当前官方策略没有高度扫描输入，分级测试衡量的是盲走抗扰能力。
 
 ## 来源
 

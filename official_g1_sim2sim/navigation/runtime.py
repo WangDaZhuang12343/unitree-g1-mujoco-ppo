@@ -13,7 +13,7 @@ import mujoco
 import numpy as np
 import yaml
 
-from camera import SimulatedDepthCamera
+from camera import GroundSegmenter, SimulatedDepthCamera
 from costmap import LocalCostMap
 from g1_nav.l6_safety import SafetySystem
 from g1_nav.policy_contract import ObservationHistory, PolicyContract
@@ -62,6 +62,11 @@ class NavigationDebugFrame:
     time_s: float
     depth: np.ndarray
     points_body: np.ndarray
+    obstacle_points_body: np.ndarray
+    ground_normal: tuple[float, float, float]
+    ground_offset: float
+    ground_inlier_ratio: float
+    ground_plane_cached: bool
     obstacle_map: np.ndarray
     distance_field: np.ndarray
     map_extent: tuple[float, float, float, float]
@@ -136,7 +141,6 @@ def run_navigation(
     mujoco.mj_forward(model, data)
 
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
-    floor_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
     obstacle_geom_ids = {
         obstacle.name: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"course_{obstacle.name}")
         for obstacle in scenario.obstacles
@@ -147,6 +151,7 @@ def run_navigation(
 
     camera = SimulatedDepthCamera()
     camera.isolate_world_geoms(model)
+    ground_segmenter = GroundSegmenter()
     costmap = LocalCostMap()
     navigator = DWANavigator()
     safety = SafetySystem()
@@ -212,10 +217,13 @@ def run_navigation(
             if step % perception_interval == 0:
                 planning_start = time.perf_counter()
                 frame = camera.capture(model, data, body_id)
-                non_ground = frame.point_geom_ids != floor_id
+                segmentation = ground_segmenter.segment(
+                    frame.points_body,
+                    projected_gravity(data.qpos[3:7]),
+                )
                 costmap.update(
-                    frame.points_body[non_ground],
-                    ground_z_body=-float(data.xpos[body_id, 2]),
+                    segmentation.obstacle_points,
+                    ground_plane=(segmentation.plane.normal, segmentation.plane.offset),
                 )
                 goal_body = goal_in_body(data, body_id, goal_world)
                 desired_plan = navigator.plan(
@@ -233,6 +241,11 @@ def run_navigation(
                         time_s=float(data.time),
                         depth=frame.depth.copy(),
                         points_body=frame.points_body.copy(),
+                        obstacle_points_body=segmentation.obstacle_points.copy(),
+                        ground_normal=tuple(float(value) for value in segmentation.plane.normal),
+                        ground_offset=segmentation.plane.offset,
+                        ground_inlier_ratio=segmentation.inlier_ratio,
+                        ground_plane_cached=segmentation.used_cached_plane,
                         obstacle_map=costmap.obstacle_map.copy(),
                         distance_field=costmap.distance_field.copy(),
                         map_extent=(

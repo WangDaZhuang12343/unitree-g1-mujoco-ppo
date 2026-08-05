@@ -30,12 +30,16 @@ class NavigationDebugViewer:
         self.depth_axis.set(title="Depth Image", xlabel="Pixel X", ylabel="Pixel Y")
 
         self.cloud_scatter = self.cloud_axis.scatter([], [], s=5, c=[], cmap="turbo", vmin=-0.8, vmax=0.8)
+        self.obstacle_scatter = self.cloud_axis.scatter(
+            [], [], s=16, facecolors="none", edgecolors="#dc2626", linewidths=0.8, label="Obstacle"
+        )
         self.figure.colorbar(self.cloud_scatter, ax=self.cloud_axis, label="Height in body frame (m)")
         self.cloud_axis.set(
             title="Point Cloud (body frame)", xlabel="Forward X (m)", ylabel="Left Y (m)",
             xlim=(-0.5, 4.0), ylim=(-2.0, 2.0), aspect="equal",
         )
         self.cloud_axis.grid(True, alpha=0.25)
+        self.cloud_axis.legend(loc="upper right")
 
         self.costmap_image = self.costmap_axis.imshow(
             np.zeros((80, 90), dtype=np.float32), origin="lower", interpolation="nearest",
@@ -87,6 +91,10 @@ class NavigationDebugViewer:
         else:
             self.cloud_scatter.set_offsets(np.empty((0, 2)))
             self.cloud_scatter.set_array(np.empty(0))
+        obstacle_points = frame.obstacle_points_body
+        self.obstacle_scatter.set_offsets(
+            obstacle_points[:, :2] if obstacle_points.size else np.empty((0, 2))
+        )
 
         self.costmap_image.set_data(frame.obstacle_map.astype(np.float32))
         self.costmap_image.set_extent(frame.map_extent)
@@ -108,10 +116,12 @@ class NavigationDebugViewer:
         pose_x, pose_y, pose_yaw = frame.robot_world_pose
         vx, vy, omega = frame.command
         valid_count = int(np.count_nonzero(frame.candidate_valid))
+        ground_state = "cached" if frame.ground_plane_cached else f"{frame.ground_inlier_ratio:.0%}"
         self.status.set_text(
             f"t={frame.time_s:5.1f}s | pose=({pose_x:+.2f}, {pose_y:+.2f}, {np.degrees(pose_yaw):+.1f} deg) | "
             f"cmd=({vx:.2f}, {vy:+.2f}, {omega:+.2f}) | "
-            f"DWA={frame.planning_ms:.1f} ms | valid={valid_count}/{len(frame.candidate_valid)}"
+            f"ground={ground_state} | DWA={frame.planning_ms:.1f} ms | "
+            f"valid={valid_count}/{len(frame.candidate_valid)}"
         )
         if self._interactive_canvas:
             self.figure.canvas.draw_idle()

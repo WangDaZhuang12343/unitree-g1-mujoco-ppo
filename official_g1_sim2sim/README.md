@@ -91,6 +91,8 @@ Navigation Benchmark 模块位于 `navigation/` 和 `benchmark/`。运行后输�
 
 Debug Viewer 位于 `visualization/`，实时显示 Depth Image、Point Cloud、Occupancy Costmap、DWA 候选/选中路径、机器人位姿和目标。该界面是可选调试消费者，普通 Benchmark 不会生成或复制调试数据。
 
+地面分割位于 `camera/ground_segmentation.py`，使用重力约束 RANSAC 和最小二乘平面精修。导航感知链路已不依赖 MuJoCo geom ID 剔除地面，回归结果见 `reports/ground_segmentation_report.md`。
+
 默认是平地测试，避免机器人在起点前方约 1 米处撞上官方场景障碍物。指标保存在 `runs/latest.csv`，仿真窗口关闭后程序会自动结束。
 
 障碍分级报告保存在 `runs/obstacle_benchmark/report.md`，Git 快照位于 `reports/obstacle_report.md`。当前官方策略没有高度扫描输入，分级测试衡量的是盲走抗扰能力。

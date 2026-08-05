@@ -63,3 +63,11 @@
 - 只有注册 `debug_callback` 时，规划器才收集 331 条候选轨迹，运行时才复制 Depth、Point Cloud 和 Costmap。
 - 局部 Costmap 前向范围是 4 米，但目标可能在 5 米以外；Debug Viewer 显示边界需要单独扩展，否则 Goal 标记会被裁掉。
 - 当前规划耗时约 167～279 ms，Debug Viewer 可直接观察每帧数值；性能优化仍归属 Priority 5，不在本阶段修改 DWA 算法。
+
+# 2026-08-05 Ground Segmentation
+
+- 地面平面用 `normal · point + offset = 0` 表示，法向量朝向与 IMU 重力相反的上方。
+- RANSAC 只接受法向量与重力约束相容的平面，避免把竖直墙面当成地面；再用全部内点做最小二乘精修。
+- Costmap 高度应使用点到地面的有符号距离，不能继续使用 `point.z - fixed_ground_z`，否则机器人俯仰时会产生假障碍。
+- 真实深度相机会出现空帧和稀疏帧。已缓存最近有效平面，稀疏帧不再使导航异常退出。
+- 仿真 geom ID 可作为测试 oracle 计算分类准确率，但不能进入生产感知链路。

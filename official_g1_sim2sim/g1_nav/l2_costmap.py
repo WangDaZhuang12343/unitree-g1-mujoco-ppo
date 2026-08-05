@@ -43,14 +43,28 @@ class LocalCostMap:
     def in_bounds(self, gx: int, gy: int) -> bool:
         return 0 <= gx < self.nx and 0 <= gy < self.ny
 
-    def update(self, points_body: np.ndarray, ground_z_body: float) -> None:
+    def update(
+        self,
+        points_body: np.ndarray,
+        ground_z_body: float | None = None,
+        ground_plane: tuple[np.ndarray, float] | None = None,
+    ) -> None:
         self.height_map.fill(-np.inf)
         self.obstacle_map.fill(False)
         points = np.asarray(points_body, dtype=np.float32)
         if points.size == 0:
             self.distance_field.fill(max(self.config.front_range, 2.0 * self.config.side_range))
             return
-        heights = points[:, 2] - ground_z_body
+        if ground_plane is not None:
+            normal, offset = ground_plane
+            normal = np.asarray(normal, dtype=np.float32)
+            if normal.shape != (3,):
+                raise ValueError("地面法向量必须是三维")
+            heights = points @ normal + float(offset)
+        elif ground_z_body is not None:
+            heights = points[:, 2] - ground_z_body
+        else:
+            raise ValueError("必须提供 ground_plane 或 ground_z_body")
         valid = (
             (points[:, 0] >= -self.config.rear_range)
             & (points[:, 0] < self.config.front_range)

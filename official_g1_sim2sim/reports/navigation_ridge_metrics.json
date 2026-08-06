@@ -1,0 +1,21 @@
+{
+  "settings": {
+    "seed": 20260806,
+    "samples": 800,
+    "train_samples": 600,
+    "validation_samples": 200,
+    "regularization": 300.0
+  },
+  "metrics": {
+    "samples": 200,
+    "mae_vx": 0.0666092038154602,
+    "mae_vy": 0.03206465393304825,
+    "mae_omega": 0.03882884234189987,
+    "command_mae": 0.04583422839641571,
+    "raw_inference_ms": 0.8320843699766556,
+    "safe_adapter_ms": 1.527462355006719,
+    "safety_veto_count": 2,
+    "safety_veto_rate": 0.01,
+    "safe_stop_rate": 0.01
+  }
+}

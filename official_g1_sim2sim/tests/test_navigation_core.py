@@ -5,7 +5,7 @@ import numpy as np
 from g1_nav.l2_costmap import CostMapConfig, LocalCostMap
 from g1_nav.l3_dwa import DWANavigator
 from g1_nav.l6_safety import SafetySystem
-from planner import LearnedNavigator, LocalNavigator
+from planner import LearnedNavigator, LocalNavigator, RidgeNavigationPolicy, compact_features
 
 
 class NavigationCoreTest(unittest.TestCase):
@@ -94,12 +94,54 @@ class NavigationCoreTest(unittest.TestCase):
         result = navigator.plan(costmap, (3.0, 0.0), collect_debug=True)
         self.assertEqual((result.vx, result.vy, result.omega), (0.0, 0.0, 0.0))
         self.assertEqual(navigator.last_debug.valid.tolist(), [False])
+        self.assertTrue(navigator.last_command_vetoed)
+
+    def test_learned_navigator_shapes_forward_command_around_walk_deadzone(self):
+        costmap = LocalCostMap()
+        costmap.update(np.empty((0, 3)), ground_z_body=0.0)
+        stopped = LearnedNavigator(lambda _: np.array([0.19, 0.0, 0.0])).plan(costmap, (3.0, 0.0))
+        walking = LearnedNavigator(lambda _: np.array([0.21, 0.0, 0.0])).plan(costmap, (3.0, 0.0))
+        self.assertEqual(stopped.vx, 0.0)
+        self.assertEqual(walking.vx, 0.25)
 
     def test_learned_navigator_rejects_invalid_policy_output(self):
         costmap = LocalCostMap()
         costmap.update(np.empty((0, 3)), ground_z_body=0.0)
         with self.assertRaisesRegex(ValueError, "三个有限数值"):
             LearnedNavigator(lambda _: np.array([np.nan, 0.0])).plan(costmap, (3.0, 0.0))
+
+    def test_compact_features_and_ridge_policy_round_trip(self):
+        costmap = LocalCostMap()
+        costmap.update(np.empty((0, 3)), ground_z_body=0.0)
+        observations = []
+        targets = []
+        for goal_y, omega in [(-0.5, -0.1), (0.0, 0.0), (0.5, 0.1)]:
+            observation = LearnedNavigator.encode_observation(costmap, (3.0, goal_y))
+            observations.append(observation)
+            targets.append([0.3, 0.0, omega])
+        self.assertEqual(compact_features(observations[0]).shape, (452,))
+        policy = RidgeNavigationPolicy.fit(np.stack(observations), np.asarray(targets))
+        prediction = policy(observations[1])
+        np.testing.assert_allclose(prediction, targets[1], atol=1e-3)
+
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            policy.save(path)
+            loaded = RidgeNavigationPolicy.load(path)
+            np.testing.assert_allclose(loaded(observations[2]), policy(observations[2]))
+
+    def test_teacher_case_sampling_is_reproducible(self):
+        from train_navigation_policy import sample_case
+        first_map, first_goal = sample_case(20260806)
+        second_map, second_goal = sample_case(20260806)
+        third_map, third_goal = sample_case(20260807)
+        self.assertEqual(first_goal, second_goal)
+        np.testing.assert_array_equal(first_map.obstacle_map, second_map.obstacle_map)
+        self.assertFalse(
+            first_goal == third_goal and np.array_equal(first_map.obstacle_map, third_map.obstacle_map)
+        )
 
 
 if __name__ == "__main__":

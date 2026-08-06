@@ -95,6 +95,16 @@
 - [x] 阶段A：建立学习策略Costmap/Goal输入与三维物理速度输出合同。
 - [x] 阶段A：增加有限值、速度限幅和独立轨迹碰撞否决，不绕过现有Safety System。
 - [x] 阶段A：31项测试及MuJoCo端到端假策略基线通过，Walking Policy链路未修改。
-- [ ] 阶段B：构建训练数据/环境，训练候选模型并与DWA做同口径Benchmark。
+- [x] 阶段B首次迭代：构建教师数据、训练轻量候选模型并与DWA做同口径Benchmark。
 
 接口和验收说明见`planner/README.md`及`reports/learning_navigation_contract.md`。
+
+### Priority 6 阶段B首次候选结果
+
+- [x] 固定种子生成800个DWA教师样本，600训练、200独立验证；原始数据仅本地保存。
+- [x] 纯NumPy岭回归候选模型完成训练，三维命令验证MAE为0.0458。
+- [x] 模型JSON、训练脚本、断点数据复用入口和DWA同场景对比脚本已固化。
+- [x] 单障碍、双障碍、窄通道闭环对比完成：DWA 3/3成功，岭回归0/3成功，双方碰撞均为0。
+- [ ] 岭回归只作为失败基线，不进入部署候选；下一轮需使用闭环数据聚合和非线性模型解决分布偏移。
+
+详细数据见`reports/navigation_ridge_training.md`和`reports/learning_navigation_benchmark.md`。

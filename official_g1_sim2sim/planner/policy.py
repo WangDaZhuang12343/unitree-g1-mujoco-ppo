@@ -34,6 +34,8 @@ class LearnedNavigatorConfig:
     """学习策略输出和独立安全校验的固定物理合同。"""
 
     max_forward_speed: float = 0.45
+    minimum_walk_speed: float = 0.25
+    walk_activation_threshold: float = 0.20
     max_lateral_speed: float = 0.10
     max_omega: float = 0.20
     predict_time: float = 2.0
@@ -57,6 +59,7 @@ class LearnedNavigator:
         self.predictor = predictor
         self.config = config or LearnedNavigatorConfig()
         self.last_debug: PlanningDebug | None = None
+        self.last_command_vetoed = False
 
     @staticmethod
     def encode_observation(
@@ -96,7 +99,12 @@ class LearnedNavigator:
         raw = np.asarray(self.predictor(observation), dtype=np.float32).reshape(-1)
         if raw.shape != (3,) or not np.all(np.isfinite(raw)):
             raise ValueError("学习导航策略必须输出三个有限数值 [vx, vy, omega]")
-        vx = float(np.clip(raw[0], 0.0, self.config.max_forward_speed))
+        raw_vx = float(np.clip(raw[0], 0.0, self.config.max_forward_speed))
+        vx = (
+            max(raw_vx, self.config.minimum_walk_speed)
+            if raw_vx >= self.config.walk_activation_threshold
+            else 0.0
+        )
         vy = float(np.clip(raw[1], -self.config.max_lateral_speed, self.config.max_lateral_speed))
         omega = float(np.clip(raw[2], -self.config.max_omega, self.config.max_omega))
         candidate_trajectory = self._trajectory(vx, vy, omega)
@@ -105,6 +113,7 @@ class LearnedNavigator:
             dtype=np.float32,
         )
         valid = bool(np.all(clearances >= self.config.robot_radius))
+        self.last_command_vetoed = not valid
         trajectory = candidate_trajectory
         if not valid:
             vx = vy = omega = 0.0

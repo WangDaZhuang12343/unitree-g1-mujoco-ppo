@@ -2,8 +2,10 @@
 
 from g1_nav.l3_dwa import DWAConfig, DWANavigator, PlanResult, PlanningDebug
 from .policy import LearnedNavigator, LearnedNavigatorConfig, LocalNavigator, PolicyPredictor
+from .learning import CompactFeatureConfig, RidgeNavigationPolicy, compact_features
 
 __all__ = [
     "DWAConfig", "DWANavigator", "LearnedNavigator", "LearnedNavigatorConfig",
-    "LocalNavigator", "PlanResult", "PlanningDebug", "PolicyPredictor",
+    "CompactFeatureConfig", "LocalNavigator", "PlanResult", "PlanningDebug",
+    "PolicyPredictor", "RidgeNavigationPolicy", "compact_features",
 ]

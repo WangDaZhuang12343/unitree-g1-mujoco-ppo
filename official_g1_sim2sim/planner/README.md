@@ -30,4 +30,7 @@ LocalCostMap + goal_body → PlanResult(vx, vy, omega, score, trajectory)
 
 `train_navigation_policy.py`支持岭回归与确定性随机ReLU特征两种纯NumPy模型，也可
 复用本地教师NPZ并追加`collect_navigation_dagger.py`生成的闭环重标注数据。已发布的
-两个模型均在三场景闭环测试中0/3成功，只用于复现实验和后续改进，不是部署候选。
+前两个无时序模型均在三场景闭环测试中0/3成功，只用于复现实验和后续改进，不是部署候选。
+
+时序候选在紧凑地图和距离场之外维护帧间特征变化与上一输出，并通过`reset()`确保场景
+之间状态隔离。它改善了单/双障碍的最终目标距离，但闭环仍为0/3成功，同样不属于部署候选。

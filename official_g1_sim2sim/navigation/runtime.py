@@ -155,6 +155,9 @@ def run_navigation(
     ground_segmenter = GroundSegmenter()
     costmap = LocalCostMap()
     navigator: LocalNavigator = run_config.navigator or DWANavigator()
+    reset_navigator = getattr(navigator, "reset", None)
+    if callable(reset_navigator):
+        reset_navigator()
     safety = SafetySystem()
     runner = policy_runner or OrtRunner(MODEL_PATH)
     owns_runner = policy_runner is None

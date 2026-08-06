@@ -61,6 +61,15 @@ class LearnedNavigator:
         self.last_debug: PlanningDebug | None = None
         self.last_command_vetoed = False
 
+    def reset(self) -> None:
+        """重置有状态预测器，防止不同导航运行共享历史。"""
+
+        reset = getattr(self.predictor, "reset", None)
+        if callable(reset):
+            reset()
+        self.last_debug = None
+        self.last_command_vetoed = False
+
     @staticmethod
     def encode_observation(
         costmap: LocalCostMap, goal_body: tuple[float, float]

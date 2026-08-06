@@ -119,3 +119,13 @@
 - [ ] 随机特征模型同样只保留为失败基线；后续应转向具备时序状态和明确闭环训练目标的模型。
 
 报告见`reports/navigation_dagger_round1.md`、`reports/navigation_random_relu_clearance_training.md`和`reports/learning_navigation_random_relu_clearance_benchmark.md`。
+
+### Priority 6 阶段B第三次迭代
+
+- [x] 建立显式时序合同：当前地图、帧间变化、上一命令和场景级`reset()`。
+- [x] 训练时按随机独立样本、单障碍序列和双障碍序列正确划分历史边界。
+- [x] 时序模型独立验证MAE 0.0486，含安全适配约2.2 ms，否决率0.5%。
+- [x] 单/双障碍最终距离分别改善至3.70 m和3.53 m，但三场景仍为0/3成功、零碰撞。
+- [ ] 时序特征方向有效但当前轻量监督模型能力不足；在引入更强训练框架前继续以DWA作为默认规划器。
+
+训练和闭环报告见`reports/navigation_temporal_training.md`与`reports/learning_navigation_temporal_benchmark.md`。

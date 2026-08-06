@@ -213,7 +213,9 @@ class RandomFeatureNavigationPolicy:
         )
 
 
-def load_navigation_policy(path: Path) -> RidgeNavigationPolicy | RandomFeatureNavigationPolicy:
+def load_navigation_policy(
+    path: Path,
+) -> RidgeNavigationPolicy | RandomFeatureNavigationPolicy | TemporalRandomFeatureNavigationPolicy:
     """按模型格式加载已固化的轻量导航策略。"""
 
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -222,4 +224,126 @@ def load_navigation_policy(path: Path) -> RidgeNavigationPolicy | RandomFeatureN
         return RidgeNavigationPolicy.load(path)
     if model_format == "g1_navigation_random_relu_v1":
         return RandomFeatureNavigationPolicy.load(path)
+    if model_format == "g1_navigation_temporal_random_relu_v1":
+        return TemporalRandomFeatureNavigationPolicy.load(path)
     raise ValueError(f"不支持的学习导航模型格式: {model_format}")
+
+
+class TemporalRandomFeatureNavigationPolicy:
+    """使用地图变化和上一命令的轻量有状态随机ReLU策略。"""
+
+    def __init__(
+        self,
+        output_weights: np.ndarray,
+        temporal_mean: np.ndarray,
+        temporal_scale: np.ndarray,
+        hidden_features: int = 64,
+        projection_seed: int = 20260806,
+        config: CompactFeatureConfig | None = None,
+    ) -> None:
+        self.config = config or CompactFeatureConfig(pooled_rows=6, pooled_cols=9, include_clearance=True)
+        self.hidden_features = int(hidden_features)
+        self.projection_seed = int(projection_seed)
+        self.temporal_mean = np.asarray(temporal_mean, dtype=np.float32)
+        self.temporal_scale = np.asarray(temporal_scale, dtype=np.float32)
+        self.base_count = _feature_count(self.config)
+        self.temporal_count = 2 * self.base_count + 3
+        self.output_weights = np.asarray(output_weights, dtype=np.float32)
+        if self.temporal_mean.shape != (self.temporal_count,) or self.temporal_scale.shape != (
+            self.temporal_count,
+        ):
+            raise ValueError("时序归一化参数形状不一致")
+        if self.output_weights.shape != (self.temporal_count + self.hidden_features + 1, 3):
+            raise ValueError("时序策略输出权重形状不一致")
+        rng = np.random.default_rng(self.projection_seed)
+        self.projection = (
+            rng.standard_normal((self.temporal_count, self.hidden_features))
+            / np.sqrt(self.temporal_count)
+        ).astype(np.float32)
+        self.hidden_bias = rng.standard_normal(self.hidden_features).astype(np.float32) * 0.1
+        self.reset()
+
+    def reset(self) -> None:
+        self.previous_features: np.ndarray | None = None
+        self.previous_command = np.zeros(3, dtype=np.float32)
+
+    def _temporal_features(self, current: np.ndarray) -> np.ndarray:
+        previous = current if self.previous_features is None else self.previous_features
+        return np.concatenate((current, current - previous, self.previous_command)).astype(np.float32)
+
+    def __call__(self, observation: np.ndarray) -> np.ndarray:
+        current = compact_features(observation, self.config)
+        temporal = self._temporal_features(current)
+        normalized = (temporal - self.temporal_mean) / self.temporal_scale
+        hidden = np.maximum(normalized @ self.projection + self.hidden_bias, 0.0)
+        design = np.concatenate((normalized, hidden, np.ones(1, dtype=np.float32)))
+        command = (design @ self.output_weights).astype(np.float32)
+        self.previous_features = current
+        self.previous_command = command
+        return command
+
+    @classmethod
+    def fit(
+        cls,
+        observations: np.ndarray,
+        targets: np.ndarray,
+        sequence_starts: np.ndarray,
+        regularization: float = 300.0,
+        hidden_features: int = 64,
+        projection_seed: int = 20260806,
+        config: CompactFeatureConfig | None = None,
+    ) -> "TemporalRandomFeatureNavigationPolicy":
+        config = config or CompactFeatureConfig(pooled_rows=6, pooled_cols=9, include_clearance=True)
+        current_features = np.stack([compact_features(row, config) for row in observations])
+        targets = np.asarray(targets, dtype=np.float32)
+        sequence_starts = np.asarray(sequence_starts, dtype=bool)
+        if sequence_starts.shape != (len(observations),) or not sequence_starts[0]:
+            raise ValueError("sequence_starts必须与样本等长且首样本为True")
+        temporal_rows: list[np.ndarray] = []
+        previous_features = current_features[0]
+        previous_command = np.zeros(3, dtype=np.float32)
+        for index, current in enumerate(current_features):
+            if sequence_starts[index]:
+                previous_features = current
+                previous_command = np.zeros(3, dtype=np.float32)
+            temporal_rows.append(np.concatenate((current, current - previous_features, previous_command)))
+            previous_features = current
+            previous_command = targets[index]
+        temporal = np.asarray(temporal_rows, dtype=np.float64)
+        mean = temporal.mean(axis=0)
+        scale = temporal.std(axis=0)
+        scale[scale < 1e-6] = 1.0
+        normalized = (temporal - mean) / scale
+        rng = np.random.default_rng(projection_seed)
+        projection = rng.standard_normal((temporal.shape[1], hidden_features)) / np.sqrt(temporal.shape[1])
+        hidden_bias = rng.standard_normal(hidden_features) * 0.1
+        hidden = np.maximum(normalized @ projection + hidden_bias, 0.0)
+        design = np.column_stack((normalized, hidden, np.ones(len(temporal))))
+        penalty = np.eye(design.shape[1], dtype=np.float64) * regularization
+        penalty[-1, -1] = 0.0
+        weights = np.linalg.solve(design.T @ design + penalty, design.T @ targets)
+        return cls(weights, mean, scale, hidden_features, projection_seed, config)
+
+    def save(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "format": "g1_navigation_temporal_random_relu_v1",
+            "config": self.config.__dict__,
+            "hidden_features": self.hidden_features,
+            "projection_seed": self.projection_seed,
+            "output_weights": self.output_weights.tolist(),
+            "temporal_mean": self.temporal_mean.tolist(),
+            "temporal_scale": self.temporal_scale.tolist(),
+        }
+        path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: Path) -> "TemporalRandomFeatureNavigationPolicy":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("format") != "g1_navigation_temporal_random_relu_v1":
+            raise ValueError("不支持的时序导航模型格式")
+        return cls(
+            payload["output_weights"], payload["temporal_mean"], payload["temporal_scale"],
+            payload["hidden_features"], payload["projection_seed"],
+            CompactFeatureConfig(**payload["config"]),
+        )

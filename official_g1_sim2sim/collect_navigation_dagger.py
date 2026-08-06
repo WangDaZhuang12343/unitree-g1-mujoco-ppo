@@ -11,7 +11,7 @@ import numpy as np
 
 from costmap import LocalCostMap
 from navigation import NavigationDebugFrame, NavigationRunConfig, get_scenario, run_navigation
-from planner import DWANavigator, LearnedNavigator, RidgeNavigationPolicy
+from planner import DWANavigator, LearnedNavigator, load_navigation_policy
 from simulate import MODEL_PATH, ROOT, OrtRunner
 
 
@@ -33,7 +33,7 @@ def main() -> None:
     args = parse_args()
     if args.stride < 1:
         raise SystemExit("--stride 必须大于等于1")
-    policy = RidgeNavigationPolicy.load(args.model)
+    policy = load_navigation_policy(args.model)
     observations: list[np.ndarray] = []
     targets: list[list[float]] = []
     scene_counts: dict[str, int] = {}

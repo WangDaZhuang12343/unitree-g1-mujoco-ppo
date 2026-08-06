@@ -13,7 +13,7 @@ import numpy as np
 from costmap import LocalCostMap
 from planner import (
     DWANavigator, LearnedNavigator, RandomFeatureNavigationPolicy, RidgeNavigationPolicy,
-    CompactFeatureConfig,
+    CompactFeatureConfig, TemporalRandomFeatureNavigationPolicy,
 )
 from simulate import ROOT
 
@@ -57,7 +57,13 @@ def evaluate(
     seeds: list[int],
 ) -> dict[str, object]:
     start = time.perf_counter()
-    predictions = np.stack([policy(row) for row in observations])
+    predictions = []
+    for row in observations:
+        reset = getattr(policy, "reset", None)
+        if callable(reset):
+            reset()
+        predictions.append(policy(row))
+    predictions = np.stack(predictions)
     inference_ms = 1000.0 * (time.perf_counter() - start) / max(len(observations), 1)
     absolute_error = np.abs(predictions - targets)
     safe_outputs: list[np.ndarray] = []
@@ -66,6 +72,7 @@ def evaluate(
     for sample_seed in seeds:
         costmap, goal = sample_case(sample_seed)
         navigator = LearnedNavigator(policy)
+        navigator.reset()
         safe = navigator.plan(costmap, goal)
         safe_outputs.append([safe.vx, safe.vy, safe.omega])
         veto_count += int(navigator.last_command_vetoed)
@@ -112,10 +119,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20260806)
     parser.add_argument("--regularization", type=float, default=0.05)
-    parser.add_argument("--model-type", choices=("ridge", "random_relu"), default="ridge")
+    parser.add_argument(
+        "--model-type", choices=("ridge", "random_relu", "temporal_random_relu"),
+        default="ridge",
+    )
     parser.add_argument("--hidden-features", type=int, default=64)
     parser.add_argument("--projection-seed", type=int, default=20260806)
     parser.add_argument("--include-clearance", action="store_true")
+    parser.add_argument("--pooled-rows", type=int, default=10)
+    parser.add_argument("--pooled-cols", type=int, default=15)
     parser.add_argument("--model", type=Path, default=ROOT / "models/navigation_ridge_v1.json")
     parser.add_argument("--report", type=Path, default=ROOT / "reports/navigation_ridge_training.md")
     parser.add_argument("--metrics", type=Path, default=ROOT / "reports/navigation_ridge_metrics.json")
@@ -123,6 +135,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-in", type=Path, default=None, help="复用已生成的本地NPZ")
     parser.add_argument("--aggregate", type=Path, default=None, help="追加闭环DAgger教师NPZ")
     parser.add_argument("--aggregate-limit", type=int, default=None)
+    parser.add_argument(
+        "--aggregate-sequence-starts", nargs="+", type=int, default=[0],
+        help="聚合NPZ内部各序列的起始下标",
+    )
     return parser.parse_args()
 
 
@@ -142,6 +158,7 @@ def main() -> None:
     split = args.samples - args.validation
     train_observations = observations[:split]
     train_targets = targets[:split]
+    sequence_starts = np.ones(split, dtype=bool)
     aggregate_samples = 0
     if args.aggregate is not None:
         aggregate = np.load(args.aggregate)
@@ -153,8 +170,24 @@ def main() -> None:
         aggregate_samples = len(aggregate_observations)
         train_observations = np.concatenate((train_observations, aggregate_observations))
         train_targets = np.concatenate((train_targets, aggregate_targets))
-    feature_config = CompactFeatureConfig(include_clearance=args.include_clearance)
-    if args.model_type == "random_relu":
+        aggregate_starts = np.zeros(aggregate_samples, dtype=bool)
+        for start in args.aggregate_sequence_starts:
+            if 0 <= start < aggregate_samples:
+                aggregate_starts[start] = True
+        if aggregate_samples and not aggregate_starts[0]:
+            raise SystemExit("聚合数据的首个序列起点必须为0")
+        sequence_starts = np.concatenate((sequence_starts, aggregate_starts))
+    feature_config = CompactFeatureConfig(
+        pooled_rows=args.pooled_rows, pooled_cols=args.pooled_cols,
+        include_clearance=args.include_clearance,
+    )
+    if args.model_type == "temporal_random_relu":
+        policy = TemporalRandomFeatureNavigationPolicy.fit(
+            train_observations, train_targets, sequence_starts,
+            regularization=args.regularization, hidden_features=args.hidden_features,
+            projection_seed=args.projection_seed, config=feature_config,
+        )
+    elif args.model_type == "random_relu":
         policy = RandomFeatureNavigationPolicy.fit(
             train_observations, train_targets, regularization=args.regularization,
             hidden_features=args.hidden_features, projection_seed=args.projection_seed,

@@ -7,7 +7,7 @@ from g1_nav.l3_dwa import DWANavigator
 from g1_nav.l6_safety import SafetySystem
 from planner import (
     LearnedNavigator, LocalNavigator, RandomFeatureNavigationPolicy,
-    RidgeNavigationPolicy, compact_features,
+    RidgeNavigationPolicy, TemporalRandomFeatureNavigationPolicy, compact_features,
 )
 
 
@@ -165,6 +165,31 @@ class NavigationCoreTest(unittest.TestCase):
             first.save(path)
             loaded = RandomFeatureNavigationPolicy.load(path)
             np.testing.assert_allclose(first(observations[4]), loaded(observations[4]))
+
+    def test_temporal_policy_reset_and_round_trip(self):
+        costmap = LocalCostMap()
+        costmap.update(np.empty((0, 3)), ground_z_body=0.0)
+        observations = np.stack([
+            LearnedNavigator.encode_observation(costmap, (3.0, y))
+            for y in (-0.8, -0.4, 0.0, 0.4, 0.8)
+        ])
+        targets = np.asarray([[0.3, 0.0, y * 0.1] for y in (-0.8, -0.4, 0.0, 0.4, 0.8)])
+        starts = np.asarray([True, False, False, True, False])
+        policy = TemporalRandomFeatureNavigationPolicy.fit(
+            observations, targets, starts, hidden_features=8
+        )
+        initial = policy(observations[0])
+        policy(observations[1])
+        policy.reset()
+        np.testing.assert_allclose(policy(observations[0]), initial)
+
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "temporal.json"
+            policy.save(path)
+            loaded = TemporalRandomFeatureNavigationPolicy.load(path)
+            np.testing.assert_allclose(loaded(observations[0]), initial)
 
 
 if __name__ == "__main__":

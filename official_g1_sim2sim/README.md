@@ -1,5 +1,7 @@
 # Unitree G1 官方策略 MuJoCo 验证
 
+工程架构、冻结基准、学习失败分析和未来迁移接口见[工程文档索引](docs/engineering/README.md)。Isaac Lab迁移代码不在当前`main`中，缺少独立迁移分支时不会重新生成该目录。
+
 本目录在 CPU 上运行 Unitree 官方 G1 29DoF 速度策略，用于安全的 MuJoCo Sim2Sim 验证。
 
 ## 依赖布局

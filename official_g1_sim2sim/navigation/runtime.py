@@ -17,7 +17,7 @@ from camera import GroundSegmenter, SimulatedDepthCamera
 from costmap import LocalCostMap
 from g1_nav.l6_safety import SafetySystem
 from g1_nav.policy_contract import ObservationHistory, PolicyContract
-from planner import DWANavigator, PlanResult
+from planner import DWANavigator, LocalNavigator, PlanResult
 from simulate import CONFIG_PATH, MODEL_PATH, OrtRunner, build_model, projected_gravity, quaternion_euler
 
 from .run_log import write_navigation_log
@@ -33,6 +33,7 @@ class NavigationRunConfig:
     realtime: bool = False
     run_id: str = "run_001"
     debug_callback: Callable[["NavigationDebugFrame"], bool | None] | None = None
+    navigator: LocalNavigator | None = None
 
 
 @dataclass(frozen=True)
@@ -153,7 +154,7 @@ def run_navigation(
     camera.isolate_world_geoms(model)
     ground_segmenter = GroundSegmenter()
     costmap = LocalCostMap()
-    navigator = DWANavigator()
+    navigator: LocalNavigator = run_config.navigator or DWANavigator()
     safety = SafetySystem()
     runner = policy_runner or OrtRunner(MODEL_PATH)
     owns_runner = policy_runner is None

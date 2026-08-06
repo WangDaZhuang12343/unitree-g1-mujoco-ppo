@@ -88,3 +88,13 @@
 - [x] 区分单日志周期新增碰撞事件和整次运行累计碰撞数。
 - [x] 字段名包含单位，`logging/README.md` 明确指标语义和数据保留边界。
 - [x] 27项单元测试、Python编译检查和0.3秒端到端CSV烟雾测试通过。
+
+## Priority 6 实施状态
+
+- [x] 阶段A：定义可替换DWA的`LocalNavigator`合同并让运行时支持依赖注入。
+- [x] 阶段A：建立学习策略Costmap/Goal输入与三维物理速度输出合同。
+- [x] 阶段A：增加有限值、速度限幅和独立轨迹碰撞否决，不绕过现有Safety System。
+- [x] 阶段A：31项测试及MuJoCo端到端假策略基线通过，Walking Policy链路未修改。
+- [ ] 阶段B：构建训练数据/环境，训练候选模型并与DWA做同口径Benchmark。
+
+接口和验收说明见`planner/README.md`及`reports/learning_navigation_contract.md`。

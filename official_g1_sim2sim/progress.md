@@ -190,3 +190,11 @@ MuJoCo mj_multiRay 深度相机
 - [x] 27项单元测试、Python编译检查及端到端CSV烟雾测试通过。
 
 下一阶段为Priority 6：研究只替换Costmap/DWA到速度映射的学习型导航层，不修改Unitree官方Walking Policy。
+
+## Learning-based Navigation 阶段A成果
+
+- [x] 建立`LocalNavigator`稳定合同，DWA与学习策略可在运行时注入切换。
+- [x] 学习策略只读取Costmap和机器人坐标目标，只输出`vx/vy/omega`。
+- [x] 增加输出有限值检查、物理限幅和轨迹碰撞否决，保留现有Safety System。
+- [x] 31项测试和0.3秒MuJoCo假策略端到端基线通过。
+- [ ] 尚未训练或发布学习模型；下一步为训练环境、候选模型和DWA同口径对比。

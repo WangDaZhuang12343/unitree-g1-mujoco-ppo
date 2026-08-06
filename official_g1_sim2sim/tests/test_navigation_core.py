@@ -5,6 +5,7 @@ import numpy as np
 from g1_nav.l2_costmap import CostMapConfig, LocalCostMap
 from g1_nav.l3_dwa import DWANavigator
 from g1_nav.l6_safety import SafetySystem
+from planner import LearnedNavigator, LocalNavigator
 
 
 class NavigationCoreTest(unittest.TestCase):
@@ -63,6 +64,42 @@ class NavigationCoreTest(unittest.TestCase):
         np.testing.assert_allclose(first, [0.06, 0.03, 0.06], atol=1e-6)
         stopped = safety.update(0.3, 0.0, 0.0, 0.1, 0.3, 0.0, 0.0)
         np.testing.assert_allclose(stopped, [0.0, 0.0, 0.0])
+
+    def test_dwa_satisfies_replaceable_navigator_contract(self):
+        self.assertIsInstance(DWANavigator(), LocalNavigator)
+
+    def test_learned_navigator_encodes_goal_map_and_limits_output(self):
+        costmap = LocalCostMap()
+        costmap.update(np.empty((0, 3)), ground_z_body=0.0)
+        seen = []
+
+        def predictor(observation):
+            seen.append(observation.copy())
+            return np.array([1.0, -1.0, 1.0], dtype=np.float32)
+
+        navigator = LearnedNavigator(predictor)
+        result = navigator.plan(costmap, (8.0, -4.0), collect_debug=True)
+        np.testing.assert_allclose(seen[0][:2], [1.0, -1.0])
+        self.assertEqual(seen[0].size, 2 + costmap.obstacle_map.size)
+        np.testing.assert_allclose((result.vx, result.vy, result.omega), (0.45, -0.10, 0.20))
+        self.assertIsNotNone(navigator.last_debug)
+        self.assertEqual(navigator.last_debug.valid.tolist(), [True])
+
+    def test_learned_navigator_vetoes_colliding_trajectory(self):
+        costmap = LocalCostMap(CostMapConfig(inflation_radius=0.0))
+        y = np.linspace(-0.5, 0.5, 41)
+        points = np.column_stack([np.full_like(y, 0.5), y, np.full_like(y, 0.12)])
+        costmap.update(points, ground_z_body=0.0)
+        navigator = LearnedNavigator(lambda _: np.array([0.45, 0.0, 0.0]))
+        result = navigator.plan(costmap, (3.0, 0.0), collect_debug=True)
+        self.assertEqual((result.vx, result.vy, result.omega), (0.0, 0.0, 0.0))
+        self.assertEqual(navigator.last_debug.valid.tolist(), [False])
+
+    def test_learned_navigator_rejects_invalid_policy_output(self):
+        costmap = LocalCostMap()
+        costmap.update(np.empty((0, 3)), ground_z_body=0.0)
+        with self.assertRaisesRegex(ValueError, "三个有限数值"):
+            LearnedNavigator(lambda _: np.array([np.nan, 0.0])).plan(costmap, (3.0, 0.0))
 
 
 if __name__ == "__main__":

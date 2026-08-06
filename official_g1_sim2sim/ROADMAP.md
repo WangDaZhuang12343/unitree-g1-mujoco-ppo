@@ -17,9 +17,9 @@
 | `camera/` | 深度相机与可迁移地面分割 | Priority 3 已完成 |
 | `costmap/` | 局部代价地图稳定入口 | 已建立 |
 | `planner/` | DWA 局部规划稳定入口 | 已建立 |
-| `benchmark/` | 批量统计、报告和可恢复 Monte Carlo | Priority 4 执行中 |
+| `benchmark/` | 批量统计、报告和可恢复 Monte Carlo | Priority 4 已完成 |
 | `visualization/` | Pipeline Debug Viewer | Priority 2 已完成 |
-| `logging/` | Priority 5 日志边界说明 | 待扩展 |
+| `logging/` | 结构化逐帧调试日志与字段说明 | Priority 5 已完成 |
 
 `g1_nav/` 继续保留已验证的相机、代价地图、DWA、安全层和策略合同实现，新目录先提供稳定入口，避免一次性大规模搬迁导致回归。
 
@@ -44,8 +44,8 @@
 
 1. **Priority 2：Visualization（已完成）**：显示 Depth Image、Point Cloud、Occupancy Costmap、DWA 候选路径、选中路径、Robot Pose 和 Goal。
 2. **Priority 3：Ground Segmentation（已完成）**：使用 RANSAC/Least Square/Gravity Constraint 替换 MuJoCo geom ID，并用相同 Benchmark 做回归。
-3. **Priority 4：Monte Carlo（执行中）**：参数化障碍宽度、间距、高度、目标点和随机地图，运行 100 次统计。
-4. **Priority 5：Debug Logging**：补齐 Depth FPS、Planning FPS/Time、Control Latency、Velocity、Pose、Goal Error 和 Collision Event 日志。
+3. **Priority 4：Monte Carlo（已完成）**：参数化障碍宽度、间距、高度、目标点和随机地图，运行 100 次统计。
+4. **Priority 5：Debug Logging（已完成）**：补齐 Depth FPS、Planning FPS/Time、Control Latency、Velocity、Pose、Goal Error 和 Collision Event 日志。
 5. **Priority 6：Learning-based Navigation**：只替换 Costmap/DWA 到速度的导航层，不替换官方 Walking Policy。
 6. **Priority 7：Isaac Lab**：研究 Height Scan、Terrain Curriculum 和 Navigation Policy，不训练 Walking。
 7. **Priority 8：真机设计**：最后再引入 RealSense、标定、延时测量、Safety Layer、急停和速度限制。
@@ -80,3 +80,11 @@
 - [x] 正式100次低优先级批次已完成。
 - 最终结果：87/100成功，95% Wilson CI 79.0%～92.2%；前四组成功率85%～100%，随机地图成功率60%并产生32个碰撞事件。
 - 精简报告见 `reports/monte_carlo_report.md`；逐帧数据和服务日志仅保留在本地。
+
+## Priority 5 验收结果
+
+- [x] 单一CSV时间轴记录世界位姿、目标误差、规划速度、安全层指令和实际机体速度。
+- [x] 记录运行时Depth FPS、Planning FPS、单帧规划耗时和规划到控制应用延迟。
+- [x] 区分单日志周期新增碰撞事件和整次运行累计碰撞数。
+- [x] 字段名包含单位，`logging/README.md` 明确指标语义和数据保留边界。
+- [x] 27项单元测试、Python编译检查和0.3秒端到端CSV烟雾测试通过。

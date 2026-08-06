@@ -7,6 +7,7 @@ import mujoco
 import numpy as np
 
 from benchmark import write_benchmark_reports
+from navigation.run_log import NAVIGATION_LOG_FIELDS, write_navigation_log
 from navigation.runtime import NavigationRunResult, obstacle_clearance
 from navigation.scenarios import ObstacleBox, get_scenario, scenario_names
 from simulate import build_model
@@ -64,6 +65,22 @@ class NavigationBenchmarkTest(unittest.TestCase):
             self.assertTrue((output / "success_rate.csv").is_file())
             report = (output / "navigation_report.md").read_text(encoding="utf-8")
             self.assertIn("总成功率：100.0%", report)
+
+    def test_debug_log_schema_covers_priority_five_metrics(self):
+        required = {
+            "depth_fps", "planning_fps", "planning_ms", "control_latency_ms",
+            "cmd_vx", "cmd_vy", "cmd_omega", "measured_vx_mps", "measured_vy_mps",
+            "x_m", "y_m", "yaw_rad", "goal_distance_m", "collision_event",
+            "collision_count",
+        }
+        self.assertTrue(required.issubset(NAVIGATION_LOG_FIELDS))
+        row = list(range(len(NAVIGATION_LOG_FIELDS)))
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "navigation.csv"
+            write_navigation_log(output, [row])
+            lines = output.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(lines[0].split(","), list(NAVIGATION_LOG_FIELDS))
+            self.assertEqual(len(lines[1].split(",")), len(NAVIGATION_LOG_FIELDS))
 
 
 if __name__ == "__main__":

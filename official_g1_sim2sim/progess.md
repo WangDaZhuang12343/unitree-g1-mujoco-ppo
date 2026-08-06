@@ -180,3 +180,13 @@ MuJoCo mj_multiRay 深度相机
 - 随机地图成功率60%，累计32个碰撞事件，是下一阶段的主要风险点。
 - 总体最小净空为-0.140米；负值来自随机地图碰撞样本。
 - 正式批次已正常结束，断点和逐帧原始数据保留在本地，不纳入Git。
+
+## Debug Logging 阶段成果
+
+- [x] 逐帧CSV补齐Depth FPS、Planning FPS、Planning Time和Control Latency。
+- [x] 同一时间轴记录规划速度、安全层指令、实际机体速度、世界位姿与目标误差。
+- [x] 新增单周期`collision_event`并保留累计`collision_count`。
+- [x] 指标语义、单位和本地数据保留边界已写入`logging/README.md`。
+- [x] 27项单元测试、Python编译检查及端到端CSV烟雾测试通过。
+
+下一阶段为Priority 6：研究只替换Costmap/DWA到速度映射的学习型导航层，不修改Unitree官方Walking Policy。

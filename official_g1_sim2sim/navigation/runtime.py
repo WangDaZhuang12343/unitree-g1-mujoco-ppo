@@ -190,6 +190,10 @@ def run_navigation(
     viewer = None
     perception_frames = 0
     planning_times: list[float] = []
+    latest_planning_ms = 0.0
+    latest_control_latency_ms = 0.0
+    latest_plan_ready_at: float | None = None
+    collision_events_since_log = 0
     min_clearance = obstacle_clearance(data.qpos[:2], scenario.obstacles, 0.0)
     completed_steps = 0
     wall_start = time.perf_counter()
@@ -230,6 +234,8 @@ def run_navigation(
                     costmap, goal_body, collect_debug=run_config.debug_callback is not None
                 )
                 planning_ms = (time.perf_counter() - planning_start) * 1000.0
+                latest_planning_ms = planning_ms
+                latest_plan_ready_at = time.perf_counter()
                 planning_times.append(planning_ms)
                 perception_frames += 1
                 if run_config.debug_callback is not None:
@@ -269,6 +275,11 @@ def run_navigation(
                     desired_plan.vx, desired_plan.vy, desired_plan.omega,
                     contract.step_dt, float(data.qpos[2]), roll, pitch,
                 )
+                if latest_plan_ready_at is not None:
+                    latest_control_latency_ms = (
+                        time.perf_counter() - latest_plan_ready_at
+                    ) * 1000.0
+                    latest_plan_ready_at = None
                 history.append(observations())
                 observation = history.flatten(list(contract.observation_order))
                 last_action[:] = runner.run(observation)
@@ -285,7 +296,9 @@ def run_navigation(
                 for geom_id in (contact.geom1, contact.geom2):
                     if geom_id in obstacle_geom_set:
                         current_collisions.add(geom_id)
-            collision_count += len(current_collisions - active_collisions)
+            new_collision_events = len(current_collisions - active_collisions)
+            collision_count += new_collision_events
+            collision_events_since_log += new_collision_events
             active_collisions = current_collisions
 
             clearance = obstacle_clearance(data.qpos[:2], scenario.obstacles, float(data.time))
@@ -293,12 +306,20 @@ def run_navigation(
             if step % policy_interval == 0:
                 _, _, yaw = quaternion_euler(data.qpos[3:7])
                 distance = float(np.linalg.norm(goal_world - data.qpos[:2]))
+                wall_elapsed = max(time.perf_counter() - wall_start, 1e-9)
+                rotation_world_from_body = data.xmat[body_id].reshape(3, 3)
+                velocity_body = rotation_world_from_body.T @ data.qvel[:3]
                 positions.append(data.qpos[:2].copy())
                 rows.append([
                     data.time, data.qpos[0], data.qpos[1], data.qpos[2], yaw,
                     command[0], command[1], command[2], desired_plan.vx, desired_plan.vy,
-                    desired_plan.omega, desired_plan.score, distance, clearance, planning_ms, collision_count,
+                    desired_plan.omega, velocity_body[0], velocity_body[1],
+                    data.sensor("imu_gyro").data[2], desired_plan.score, distance, clearance,
+                    perception_frames / wall_elapsed, len(planning_times) / wall_elapsed,
+                    latest_planning_ms, latest_control_latency_ms,
+                    collision_events_since_log, collision_count,
                 ])
+                collision_events_since_log = 0
                 if distance < 0.30:
                     reached = True
                     break

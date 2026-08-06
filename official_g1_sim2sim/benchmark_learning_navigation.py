@@ -8,7 +8,7 @@ import csv
 from pathlib import Path
 
 from navigation import NavigationRunConfig, get_scenario, run_navigation
-from planner import DWANavigator, LearnedNavigator, RidgeNavigationPolicy
+from planner import DWANavigator, LearnedNavigator, load_navigation_policy
 from simulate import MODEL_PATH, ROOT, OrtRunner
 
 
@@ -29,16 +29,17 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    policy = RidgeNavigationPolicy.load(args.model)
+    policy = load_navigation_policy(args.model)
     args.output.mkdir(parents=True, exist_ok=True)
     records: list[dict[str, object]] = []
     runner = OrtRunner(MODEL_PATH)
     try:
         for scene_name in args.scenes:
             scenario = get_scenario(scene_name)
+            learned_name = args.model.stem.removeprefix("navigation_")
             for planner_name, navigator in (
                 ("dwa", DWANavigator()),
-                ("learned_ridge", LearnedNavigator(policy)),
+                (learned_name, LearnedNavigator(policy)),
             ):
                 output = args.output / f"{scene_name}_{planner_name}.csv"
                 result = run_navigation(

@@ -1,0 +1,24 @@
+{
+  "settings": {
+    "seed": 20260806,
+    "samples": 800,
+    "train_samples": 600,
+    "validation_samples": 200,
+    "regularization": 300.0,
+    "model_type": "random_relu",
+    "aggregate_samples": 325,
+    "include_clearance": true
+  },
+  "metrics": {
+    "samples": 200,
+    "mae_vx": 0.0657726526260376,
+    "mae_vy": 0.03143434599041939,
+    "mae_omega": 0.039971381425857544,
+    "command_mae": 0.04572612792253494,
+    "raw_inference_ms": 1.9679501849896042,
+    "safe_adapter_ms": 2.567727525020018,
+    "safety_veto_count": 1,
+    "safety_veto_rate": 0.005,
+    "safe_stop_rate": 0.005
+  }
+}

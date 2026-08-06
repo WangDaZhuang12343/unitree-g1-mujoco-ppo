@@ -108,3 +108,14 @@
 - [ ] 岭回归只作为失败基线，不进入部署候选；下一轮需使用闭环数据聚合和非线性模型解决分布偏移。
 
 详细数据见`reports/navigation_ridge_training.md`和`reports/learning_navigation_benchmark.md`。
+
+### Priority 6 阶段B第二次迭代
+
+- [x] 在失败岭回归策略的实际闭环状态上完成第一轮DAgger采集，共500个DWA重标注样本。
+- [x] 实现确定性随机ReLU特征模型，并增加占据图距离场特征；无需新增机器学习依赖。
+- [x] 训练仅使用单/双障碍325个聚合样本，窄通道175个聚合样本不参与训练。
+- [x] 独立随机验证MAE 0.0457，含安全适配平均约2.6 ms，安全否决率0.5%。
+- [x] 三场景闭环仍为0/3成功、零碰撞；DWA为3/3成功。
+- [ ] 随机特征模型同样只保留为失败基线；后续应转向具备时序状态和明确闭环训练目标的模型。
+
+报告见`reports/navigation_dagger_round1.md`、`reports/navigation_random_relu_clearance_training.md`和`reports/learning_navigation_random_relu_clearance_benchmark.md`。

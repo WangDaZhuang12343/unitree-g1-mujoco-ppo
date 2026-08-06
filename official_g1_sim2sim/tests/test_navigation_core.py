@@ -5,7 +5,10 @@ import numpy as np
 from g1_nav.l2_costmap import CostMapConfig, LocalCostMap
 from g1_nav.l3_dwa import DWANavigator
 from g1_nav.l6_safety import SafetySystem
-from planner import LearnedNavigator, LocalNavigator, RidgeNavigationPolicy, compact_features
+from planner import (
+    LearnedNavigator, LocalNavigator, RandomFeatureNavigationPolicy,
+    RidgeNavigationPolicy, compact_features,
+)
 
 
 class NavigationCoreTest(unittest.TestCase):
@@ -142,6 +145,26 @@ class NavigationCoreTest(unittest.TestCase):
         self.assertFalse(
             first_goal == third_goal and np.array_equal(first_map.obstacle_map, third_map.obstacle_map)
         )
+
+    def test_random_feature_policy_is_reproducible_and_round_trips(self):
+        costmap = LocalCostMap()
+        costmap.update(np.empty((0, 3)), ground_z_body=0.0)
+        observations = np.stack([
+            LearnedNavigator.encode_observation(costmap, (3.0, y))
+            for y in (-0.8, -0.4, 0.0, 0.4, 0.8)
+        ])
+        targets = np.asarray([[0.3, 0.0, y * 0.1] for y in (-0.8, -0.4, 0.0, 0.4, 0.8)])
+        first = RandomFeatureNavigationPolicy.fit(observations, targets, hidden_features=8)
+        second = RandomFeatureNavigationPolicy.fit(observations, targets, hidden_features=8)
+        np.testing.assert_allclose(first(observations[2]), second(observations[2]))
+
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "nonlinear.json"
+            first.save(path)
+            loaded = RandomFeatureNavigationPolicy.load(path)
+            np.testing.assert_allclose(first(observations[4]), loaded(observations[4]))
 
 
 if __name__ == "__main__":

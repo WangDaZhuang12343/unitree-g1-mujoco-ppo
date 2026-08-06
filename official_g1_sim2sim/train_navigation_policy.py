@@ -11,7 +11,10 @@ import time
 import numpy as np
 
 from costmap import LocalCostMap
-from planner import DWANavigator, LearnedNavigator, RidgeNavigationPolicy
+from planner import (
+    DWANavigator, LearnedNavigator, RandomFeatureNavigationPolicy, RidgeNavigationPolicy,
+    CompactFeatureConfig,
+)
 from simulate import ROOT
 
 
@@ -48,7 +51,7 @@ def build_dataset(count: int, seed: int) -> tuple[np.ndarray, np.ndarray, list[i
 
 
 def evaluate(
-    policy: RidgeNavigationPolicy,
+    policy: RidgeNavigationPolicy | RandomFeatureNavigationPolicy,
     observations: np.ndarray,
     targets: np.ndarray,
     seeds: list[int],
@@ -88,7 +91,9 @@ def write_report(path: Path, settings: dict[str, object], metrics: dict[str, obj
         "# 轻量学习导航训练报告", "",
         f"- 随机种子：{settings['seed']}",
         f"- 训练样本：{settings['train_samples']}",
+        f"- 闭环聚合样本：{settings['aggregate_samples']}",
         f"- 验证样本：{metrics['samples']}",
+        f"- 模型类型：{settings['model_type']}",
         f"- 正则系数：{settings['regularization']}", "",
         "## 验证集指标", "",
         f"- 三维命令平均绝对误差：{metrics['command_mae']:.4f}",
@@ -107,11 +112,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20260806)
     parser.add_argument("--regularization", type=float, default=0.05)
+    parser.add_argument("--model-type", choices=("ridge", "random_relu"), default="ridge")
+    parser.add_argument("--hidden-features", type=int, default=64)
+    parser.add_argument("--projection-seed", type=int, default=20260806)
+    parser.add_argument("--include-clearance", action="store_true")
     parser.add_argument("--model", type=Path, default=ROOT / "models/navigation_ridge_v1.json")
     parser.add_argument("--report", type=Path, default=ROOT / "reports/navigation_ridge_training.md")
     parser.add_argument("--metrics", type=Path, default=ROOT / "reports/navigation_ridge_metrics.json")
     parser.add_argument("--dataset", type=Path, default=None, help="可选本地NPZ；默认不保存")
     parser.add_argument("--dataset-in", type=Path, default=None, help="复用已生成的本地NPZ")
+    parser.add_argument("--aggregate", type=Path, default=None, help="追加闭环DAgger教师NPZ")
+    parser.add_argument("--aggregate-limit", type=int, default=None)
     return parser.parse_args()
 
 
@@ -129,9 +140,31 @@ def main() -> None:
     else:
         observations, targets, seeds = build_dataset(args.samples, args.seed)
     split = args.samples - args.validation
-    policy = RidgeNavigationPolicy.fit(
-        observations[:split], targets[:split], regularization=args.regularization
-    )
+    train_observations = observations[:split]
+    train_targets = targets[:split]
+    aggregate_samples = 0
+    if args.aggregate is not None:
+        aggregate = np.load(args.aggregate)
+        aggregate_observations = np.asarray(aggregate["observations"], dtype=np.float32)
+        aggregate_targets = np.asarray(aggregate["targets"], dtype=np.float32)
+        if args.aggregate_limit is not None:
+            aggregate_observations = aggregate_observations[: args.aggregate_limit]
+            aggregate_targets = aggregate_targets[: args.aggregate_limit]
+        aggregate_samples = len(aggregate_observations)
+        train_observations = np.concatenate((train_observations, aggregate_observations))
+        train_targets = np.concatenate((train_targets, aggregate_targets))
+    feature_config = CompactFeatureConfig(include_clearance=args.include_clearance)
+    if args.model_type == "random_relu":
+        policy = RandomFeatureNavigationPolicy.fit(
+            train_observations, train_targets, regularization=args.regularization,
+            hidden_features=args.hidden_features, projection_seed=args.projection_seed,
+            config=feature_config,
+        )
+    else:
+        policy = RidgeNavigationPolicy.fit(
+            train_observations, train_targets, regularization=args.regularization,
+            config=feature_config,
+        )
     policy.save(args.model)
     metrics = evaluate(policy, observations[split:], targets[split:], seeds[split:])
     settings = {
@@ -140,6 +173,9 @@ def main() -> None:
         "train_samples": split,
         "validation_samples": args.validation,
         "regularization": args.regularization,
+        "model_type": args.model_type,
+        "aggregate_samples": aggregate_samples,
+        "include_clearance": args.include_clearance,
     }
     args.metrics.parent.mkdir(parents=True, exist_ok=True)
     args.metrics.write_text(

@@ -167,6 +167,10 @@ class G1VisualNavigationEnvCfg(DirectRLEnvCfg):
     costmap_inflation_radius: float = 0.28
     enable_dwa_fallback: bool = False
     dwa_fallback_clearance_trigger: float = 0.22
+    # Empty during training. Benchmark scripts populate this tuple and replace
+    # only the terrain generator; the navigation/walking architecture is shared.
+    benchmark_scenarios: tuple[str, ...] = ()
+    benchmark_seed: int = 7
 
     progress_reward_scale: float = 30.0
     success_reward: float = 25.0

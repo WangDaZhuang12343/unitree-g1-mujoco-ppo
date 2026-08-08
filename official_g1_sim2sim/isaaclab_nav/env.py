@@ -15,6 +15,7 @@ from isaaclab_nav.env_cfg import G1VisualNavigationEnvCfg
 from isaaclab_nav.fallback import BatchedDwaFallback
 from isaaclab_nav.perception import LocalDistanceFieldConfig, local_distance_field
 from isaaclab_nav.walking import FrozenWalkingPolicy
+from navigation.scenarios import get_scenario
 
 
 class G1VisualNavigationEnv(DirectRLEnv):
@@ -334,14 +335,26 @@ class G1VisualNavigationEnv(DirectRLEnv):
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
         count = len(env_ids)
-        valid_goals = self._terrain.flat_patches["goal"]
-        patch_ids = torch.randint(valid_goals.shape[2], (count,), device=self.device)
-        self._goal_pos_w[env_ids] = valid_goals[
-            self._terrain.terrain_levels[env_ids],
-            self._terrain.terrain_types[env_ids],
-            patch_ids,
-        ]
-        self._goal_pos_w[env_ids, 2] += 0.05
+        if self.cfg.benchmark_scenarios:
+            terrain_types = self._terrain.terrain_types[env_ids]
+            goals = torch.tensor(
+                [
+                    (*get_scenario(name, self.cfg.benchmark_seed).goal, 0.05)
+                    for name in self.cfg.benchmark_scenarios
+                ],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            self._goal_pos_w[env_ids] = self._terrain.env_origins[env_ids] + goals[terrain_types]
+        else:
+            valid_goals = self._terrain.flat_patches["goal"]
+            patch_ids = torch.randint(valid_goals.shape[2], (count,), device=self.device)
+            self._goal_pos_w[env_ids] = valid_goals[
+                self._terrain.terrain_levels[env_ids],
+                self._terrain.terrain_types[env_ids],
+                patch_ids,
+            ]
+            self._goal_pos_w[env_ids, 2] += 0.05
         self._forward_scanner.reset(env_ids)
         self._contact_sensor.reset(env_ids)
         self._safety.reset(env_ids)

@@ -68,3 +68,19 @@ OMNI_KIT_ACCEPT_EULA=YES python scripts/train_isaaclab_nav.py \
 - GPU射线距离场和MuJoCo深度图/RANSAC Costmap不是逐像素同源；跨后端评估需保持地图范围、目标、成功、碰撞和Safety判据一致。
 - DWA为CPU异常路径，不应在大量环境中持续触发；否则会降低并行训练吞吐。
 - 正式训练建议先保持32环境，检查成功率、碰撞率和fallback率，再按显存余量扩大并行数；不要修改Walking Policy或Safety合同。
+
+## 确定性 Benchmark 接入（2026-08-08）
+
+新增的独立 benchmark 配置直接复用冻结的`navigation.scenarios`，不会替换训练用随机地形。10个静态场景中的地面和箱体合并为同一个 terrain mesh，因此 PhysX 碰撞和 RayCaster 感知使用同一几何；目标点、0.30米成功半径、零碰撞和存活判据保持不变。场景按 terrain column 确定性映射，可在同一 GPU batch 中运行。
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES python scripts/benchmark_isaaclab_nav.py \
+  --headless --scenes all --planner dwa \
+  --output runs/isaaclab_navigation_benchmark
+```
+
+也可用`--planner onnx --policy_onnx <exported-policy.onnx>`评估已导出的上层策略；冒烟训练产生的`model_0.pt`不属于可部署策略，不能作为正式结果。
+
+当前 Isaac Lab 2.3 的 RayCaster 只扫描静态 terrain mesh，不能可靠扫描单独生成的运动刚体。因此`dynamic_obstacle`保留为第11项，但报告会标记`unsupported_dynamic_perception`且不计入成功率。在加入能同时参与感知和碰撞的动态障碍后端前，不应宣称11/11已完成正式同口径评估，也不建议开始长时 PPO 训练。
+
+接入回归已在 RTX 4060 Laptop GPU 上完成：10个静态场景以10环境 batch 启动并各运行0.5秒，场景映射、目标距离、碰撞计数和净空均产生有效结果；原随机训练地形的4环境 smoke 仍保持`(4,483)→(4,29)`合同，非法动作只触发指定环境的DWA fallback。该短测只验证链路，不作为场景成功率结果。

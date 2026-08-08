@@ -12,9 +12,18 @@ from isaaclab_nav.contracts import (
 )
 from isaaclab_nav.fallback import BatchedDwaFallback
 from isaaclab_nav.perception import LocalDistanceFieldConfig, local_distance_field
+from navigation.scenarios import get_scenario, scenario_names
 
 
 class IsaacLabContractsTest(unittest.TestCase):
+    def test_benchmark_contract_covers_all_frozen_scenarios(self):
+        names = scenario_names()
+        self.assertEqual(len(names), 11)
+        layouts = [get_scenario(name, seed=7) for name in names]
+        self.assertEqual([layout.name for layout in layouts], list(names))
+        self.assertEqual(layouts[0].goal, (5.0, 0.0))
+        self.assertTrue(layouts[-1].dynamic)
+
     def test_cartesian_distance_field_tracks_known_obstacle_distance(self):
         cfg = LocalDistanceFieldConfig(inflation_radius=0.28, max_clearance=5.0)
         points = torch.tensor(

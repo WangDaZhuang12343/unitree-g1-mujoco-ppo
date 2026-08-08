@@ -10,9 +10,15 @@ class G1NavigationPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 1000
     save_interval = 100
     experiment_name = "g1_visual_navigation"
-    empirical_normalization = True
+    empirical_normalization = None
+    obs_groups = {"policy": ["policy"], "critic": ["policy"]}
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=0.5,
+        # RSL-RL deprecated the runner-level empirical_normalization flag.
+        # Pin these explicitly so actor-only pretraining and PPO use the same
+        # checkpoint-visible normalization contract.
+        actor_obs_normalization=True,
+        critic_obs_normalization=True,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",

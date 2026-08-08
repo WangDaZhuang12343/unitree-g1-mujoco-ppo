@@ -14,3 +14,4 @@ third_party/
 *.ckpt
 official_g1_sim2sim/logs/
 official_g1_sim2sim/outputs/
+official_g1_sim2sim/checkpoints/

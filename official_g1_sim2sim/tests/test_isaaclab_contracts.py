@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -12,10 +14,77 @@ from isaaclab_nav.contracts import (
 )
 from isaaclab_nav.fallback import BatchedDwaFallback
 from isaaclab_nav.perception import LocalDistanceFieldConfig, local_distance_field
+from isaaclab_nav.pretraining import (
+    ACTOR_INPUT_DIM,
+    NavigationActor,
+    actor_from_rsl_rl_checkpoint,
+    load_actor_initialization,
+    make_actor_checkpoint,
+    normalized_action_to_physical_command,
+    observation_moments,
+    physical_command_to_normalized_action,
+)
 from navigation.scenarios import get_scenario, scenario_names
 
 
 class IsaacLabContractsTest(unittest.TestCase):
+    def test_navigation_action_conversion_round_trip(self):
+        command = torch.tensor([[0.0, -0.1, -0.2], [0.225, 0.0, 0.0], [0.45, 0.1, 0.2]])
+        action = physical_command_to_normalized_action(command)
+        torch.testing.assert_close(normalized_action_to_physical_command(action), command)
+
+    def test_actor_only_checkpoint_loads_normalizer_without_critic(self):
+        class Normalizer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("_mean", torch.zeros(1, ACTOR_INPUT_DIM))
+                self.register_buffer("_var", torch.ones(1, ACTOR_INPUT_DIM))
+                self.register_buffer("_std", torch.ones(1, ACTOR_INPUT_DIM))
+                self.register_buffer("count", torch.tensor(0, dtype=torch.long))
+
+        class Policy(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.actor = NavigationActor()
+                self.critic = torch.nn.Linear(ACTOR_INPUT_DIM, 1)
+                self.actor_obs_normalizer = Normalizer()
+                self.std = torch.nn.Parameter(torch.ones(3))
+
+        observations = torch.randn(32, ACTOR_INPUT_DIM)
+        mean, std = observation_moments(observations)
+        source = NavigationActor()
+        payload = make_actor_checkpoint(source, mean, std, sample_count=32, validation_mae=0.1)
+        target = Policy()
+        critic_before = target.critic.weight.detach().clone()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "actor.pt"
+            torch.save(payload, path)
+            metadata = load_actor_initialization(target, path)
+        self.assertEqual(metadata["observation_dim"], ACTOR_INPUT_DIM)
+        torch.testing.assert_close(target.actor[0].weight, source[0].weight)
+        torch.testing.assert_close(target.actor_obs_normalizer._mean, mean)
+        torch.testing.assert_close(target.critic.weight, critic_before)
+        torch.testing.assert_close(target.std, torch.full((3,), 0.2))
+
+    def test_rsl_rl_export_uses_actor_and_actor_normalizer_only(self):
+        actor = NavigationActor()
+        mean = torch.randn(1, ACTOR_INPUT_DIM)
+        std = torch.rand(1, ACTOR_INPUT_DIM) + 0.1
+        state = {f"actor.{key}": value for key, value in actor.state_dict().items()}
+        state.update({
+            "actor_obs_normalizer._mean": mean,
+            "actor_obs_normalizer._std": std,
+            "critic.0.weight": torch.full((1, ACTOR_INPUT_DIM), float("nan")),
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.pt"
+            torch.save({"model_state_dict": state, "iter": 99}, path)
+            exported, metadata = actor_from_rsl_rl_checkpoint(path)
+        observation = torch.randn(4, ACTOR_INPUT_DIM)
+        expected = actor((observation - mean) / (std + 1.0e-2))
+        torch.testing.assert_close(exported(observation), expected)
+        self.assertEqual(metadata["iteration"], 99)
+
     def test_benchmark_contract_covers_all_frozen_scenarios(self):
         names = scenario_names()
         self.assertEqual(len(names), 11)

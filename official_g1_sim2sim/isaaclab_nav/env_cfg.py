@@ -1,0 +1,154 @@
+"""Isaac Lab configuration for the frozen-policy G1 navigation task."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import isaaclab.sim as sim_utils
+import isaaclab.terrains as terrain_gen
+from isaaclab.assets import ArticulationCfg
+from isaaclab.envs import DirectRLEnvCfg
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
+from isaaclab.sim import SimulationCfg
+from isaaclab.terrains import TerrainGeneratorCfg, TerrainImporterCfg
+from isaaclab.utils import configclass
+
+from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG, UnitreeUrdfFileCfg
+
+
+def _default_walking_policy() -> str:
+    import unitree_rl_lab
+
+    source_root = Path(unitree_rl_lab.__file__).resolve().parents[3]
+    return str(
+        source_root
+        / "deploy/robots/g1_29dof/config/policy/velocity/v0/exported/policy.onnx"
+    )
+
+
+def _official_g1_robot_cfg() -> ArticulationCfg:
+    """Use Unitree's checked-out URDF; upstream's optional USD path is a placeholder."""
+
+    import unitree_rl_lab
+
+    unitree_rl_lab_root = Path(unitree_rl_lab.__file__).resolve().parents[3]
+    unitree_ros = Path(
+        os.environ.get("UNITREE_ROS_PATH", unitree_rl_lab_root.parent / "unitree_ros")
+    )
+    urdf = unitree_ros / "robots/g1_description/g1_29dof_rev_1_0.urdf"
+    if not urdf.is_file():
+        raise FileNotFoundError(f"Set UNITREE_ROS_PATH; missing official G1 URDF: {urdf}")
+    cfg = UNITREE_G1_29DOF_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+    cfg.spawn = UnitreeUrdfFileCfg(asset_path=str(urdf))
+    return cfg
+
+
+NAVIGATION_TERRAIN_CFG = TerrainGeneratorCfg(
+    seed=17,
+    curriculum=False,
+    size=(8.0, 8.0),
+    border_width=10.0,
+    num_rows=4,
+    num_cols=8,
+    color_scheme="random",
+    difficulty_range=(0.0, 1.0),
+    sub_terrains={
+        "boxes": terrain_gen.MeshRepeatedBoxesTerrainCfg(
+            proportion=1.0,
+            object_params_start=terrain_gen.MeshRepeatedBoxesTerrainCfg.ObjectCfg(
+                num_objects=4, height=0.45, size=(0.35, 0.35)
+            ),
+            object_params_end=terrain_gen.MeshRepeatedBoxesTerrainCfg.ObjectCfg(
+                num_objects=10, height=0.80, size=(0.70, 0.70)
+            ),
+            platform_width=1.6,
+            platform_height=0.0,
+        )
+    },
+)
+
+
+@configclass
+class G1VisualNavigationEnvCfg(DirectRLEnvCfg):
+    """Ten-Hz upper policy over the immutable 50-Hz Unitree walking policy."""
+
+    episode_length_s = 20.0
+    decimation = 20
+    action_space = 3
+    observation_space = 483
+    state_space = 0
+
+    sim: SimulationCfg = SimulationCfg(
+        dt=0.005,
+        render_interval=decimation,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+    )
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        num_envs=32, env_spacing=8.0, replicate_physics=True
+    )
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="generator",
+        terrain_generator=NAVIGATION_TERRAIN_CFG,
+        max_init_terrain_level=3,
+        collision_group=-1,
+        physics_material=sim.physics_material,
+        debug_vis=False,
+    )
+
+    robot: ArticulationCfg = _official_g1_robot_cfg()
+    contact_sensor = ContactSensorCfg(
+        prim_path="/World/envs/env_.*/Robot/.*",
+        history_length=3,
+        update_period=sim.dt,
+        track_air_time=False,
+    )
+    forward_scanner = RayCasterCfg(
+        prim_path="/World/envs/env_.*/Robot/torso_link",
+        update_period=decimation * sim.dt,
+        offset=RayCasterCfg.OffsetCfg(
+            pos=(0.0576235, 0.01753, 0.42987),
+            rot=(0.91497, 0.0, 0.40352, 0.0),
+        ),
+        ray_alignment="base",
+        pattern_cfg=patterns.LidarPatternCfg(
+            channels=10,
+            vertical_fov_range=(-35.0, 8.0),
+            horizontal_fov_range=(-55.0, 55.0),
+            horizontal_res=11.0,
+        ),
+        max_distance=5.0,
+        mesh_prim_paths=["/World/ground"],
+        debug_vis=False,
+    )
+
+    walking_policy_path: str = _default_walking_policy()
+    walking_action_scale: float = 0.25
+    walking_decimation: int = 4
+    goal_range: float = 4.0
+    success_radius: float = 0.30
+    collision_force_threshold: float = 20.0
+    minimum_clearance: float = 0.30
+    enable_dwa_fallback: bool = False
+    dwa_fallback_clearance_trigger: float = 0.22
+
+    progress_reward_scale: float = 30.0
+    success_reward: float = 25.0
+    collision_penalty: float = -20.0
+    fall_penalty: float = -20.0
+    clearance_penalty_scale: float = -2.0
+    action_rate_penalty_scale: float = -0.05
+    timeout_penalty: float = -2.0
+
+    def __post_init__(self):
+        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        if self.decimation % self.walking_decimation:
+            raise ValueError("upper decimation must be a multiple of walking_decimation")

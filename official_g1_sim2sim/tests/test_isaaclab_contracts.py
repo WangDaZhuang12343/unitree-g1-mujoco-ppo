@@ -11,9 +11,34 @@ from isaaclab_nav.contracts import (
     UpperObservationHistory,
 )
 from isaaclab_nav.fallback import BatchedDwaFallback
+from isaaclab_nav.perception import LocalDistanceFieldConfig, local_distance_field
 
 
 class IsaacLabContractsTest(unittest.TestCase):
+    def test_cartesian_distance_field_tracks_known_obstacle_distance(self):
+        cfg = LocalDistanceFieldConfig(inflation_radius=0.28, max_clearance=5.0)
+        points = torch.tensor(
+            [
+                [[2.0, 0.0, 0.5], [4.0, 1.0, 0.0]],
+                [[1.0, 0.0, 0.5], [4.0, 1.0, 0.0]],
+            ]
+        )
+        obstacle = torch.tensor([[True, False], [True, False]])
+        field, clearance = local_distance_field(points, obstacle, cfg)
+        self.assertEqual(field.shape, (2, 10, 10))
+        self.assertAlmostEqual(float(clearance[0]), 1.72, places=5)
+        self.assertAlmostEqual(float(clearance[1]), 0.72, places=5)
+        self.assertEqual(float(field.amin()), 0.0)
+        self.assertNotEqual(int(field[0].argmin()), int(field[1].argmin()))
+
+    def test_distance_field_is_free_without_obstacle_hits(self):
+        points = torch.zeros((2, 3, 3))
+        field, clearance = local_distance_field(
+            points, torch.zeros((2, 3), dtype=torch.bool), LocalDistanceFieldConfig()
+        )
+        self.assertTrue(torch.all(field == 1.0))
+        self.assertTrue(torch.all(clearance == 5.0))
+
     def test_dwa_fallback_only_updates_selected_environment(self):
         fallback = BatchedDwaFallback(2)
         command = fallback.plan(

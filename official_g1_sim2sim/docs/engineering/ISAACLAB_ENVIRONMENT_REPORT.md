@@ -23,18 +23,24 @@
 - 上层PPO观测为`4×120+3=483`，动作严格为`[vx, vy, omega]`三维。
 - 每个10 Hz导航步执行5次50 Hz冻结Walking Policy更新；底层仍为独立`480→29`合同。
 - Isaac关节0～28沿用已核验的官方ONNX顺序，关节目标使用官方默认姿态和`0.25`动作缩放。
-- 复用官方G1 URDF及执行器参数；前向100射线距离场挂载在`torso_link`，使用D435的URDF变换。
+- 复用官方G1 URDF及执行器参数；440条近远场射线覆盖`-75°～8°`，在GPU上把障碍点投影为真实10×10笛卡尔净空场，不再reshape原始极坐标距离。
 - 批量Safety逐环境保存、锁存和重置状态，其数值语义通过测试与冻结标量实现对照。
 - 原`DWANavigator`保留为可配置fallback；PPO训练默认关闭以获得纯RL指标，验收时可开启并记录`fallback_used`。
+- 目标由Isaac Lab terrain flat-patch采样器生成，保证目标中心0.45米半径内平坦且无障碍。
+- Unitree外部资产未修改；本导航环境局部关闭重叠碰撞网格的self-collision，避免把行走过程中的内部接触误记为地形碰撞。
+- 成功要求同周期无碰撞、无跌倒、无非法动作且累计碰撞为零；info输出`collision_count`、`collision_force`、`collision_body_id`和`termination_reason`。
 
 ## 实测验收
 
-1. 32个CUDA环境、20个导航步：观测`(32,483)`，Walking动作`(32,29)`，所有输出有限，1次安全终止。
+1. 修正后32个CUDA环境、20个导航步：观测`(32,483)`，Walking动作`(32,29)`，所有输出有限，无异常终止。
 2. DWA fallback注入测试：4环境中向1个环境注入非法RL动作，fallback触发1次，其余环境不受影响，闭环继续运行。
-3. RSL-RL PPO一轮：32环境、768 samples、约197 steps/s；actor为`483→3`，critic为`483→1`，成功完成采样和参数更新。
-4. 纯契约测试4项通过；不依赖外部仓库的现有导航核心测试均通过。完整旧套件仍需要本机缺失的`unitree_mujoco` checkout；Isaac专用环境也未额外安装MuJoCo Python包。
+3. 已知障碍回归：障碍从2米移至1米时机器人净空由1.72米降至0.72米；无障碍时10×10距离场全部为最大净空。
+4. 真实PhysX接触回归：检测到的真实膝部地形碰撞前一周期净空为0.143米，满足“先感知、后接触”。
+5. 同随机种子、8环境×200步前进控制：关闭DWA时11次碰撞；开启DWA时3次碰撞，证明fallback对真实障碍有效。
+6. RSL-RL PPO一轮：32环境、768 samples、约208 steps/s，mean reward为0.55；actor为`483→3`，critic为`483→1`。
+7. 纯契约测试6项通过。完整旧套件仍需要本机缺失的`unitree_mujoco` checkout；Isaac专用环境未额外安装MuJoCo Python包。
 
-本次生成的冒烟checkpoint位于本机`official_g1_sim2sim/logs/rsl_rl/g1_visual_navigation/2026-08-08_17-44-07/model_0.pt`，训练输出已加入Git忽略，不作为可部署策略发布。
+最新冒烟checkpoint位于本机`official_g1_sim2sim/logs/rsl_rl/g1_visual_navigation/2026-08-08_18-46-53/model_0.pt`，训练输出已加入Git忽略，不作为可部署策略发布。
 
 ## 运行方式
 
@@ -57,8 +63,8 @@ OMNI_KIT_ACCEPT_EULA=YES python scripts/train_isaaclab_nav.py \
 
 ## 风险与下一步
 
-- 当前PPO仅完成接口和一次更新验证，不代表获得可部署导航成功率；必须进行正式训练并用冻结的11类场景、Monte Carlo成功率和DWA同口径评估。
+- 当前PPO仅完成接口和一次更新验证，不代表获得可部署导航成功率；正式长训练前仍须在Isaac中复现冻结的11类场景，并用Monte Carlo成功率和DWA同口径评估。
 - 冻结Walking Policy对纯侧移和原地转向响应弱，因此动作范围仍限制为`vx≤0.45`、`|vy|≤0.10`、`|omega|≤0.20`。
-- RayCaster采用GPU距离场，和MuJoCo深度图/RANSAC Costmap不是逐像素同源；跨后端评估需保持目标、成功、碰撞和Safety判据一致。
+- GPU射线距离场和MuJoCo深度图/RANSAC Costmap不是逐像素同源；跨后端评估需保持地图范围、目标、成功、碰撞和Safety判据一致。
 - DWA为CPU异常路径，不应在大量环境中持续触发；否则会降低并行训练吞吐。
 - 正式训练建议先保持32环境，检查成功率、碰撞率和fallback率，再按显存余量扩大并行数；不要修改Walking Policy或Safety合同。

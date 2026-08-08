@@ -19,8 +19,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--num_envs", type=int, default=32)
 parser.add_argument("--steps", type=int, default=20)
 parser.add_argument("--enable_dwa_fallback", action="store_true")
+parser.add_argument("--video", action="store_true")
+parser.add_argument("--video_folder", type=str, default="/tmp/g1_isaaclab_video")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
+if args.video:
+    args.enable_cameras = True
 launcher = AppLauncher(args)
 simulation_app = launcher.app
 
@@ -36,7 +40,25 @@ def main() -> None:
     cfg.scene.num_envs = args.num_envs
     cfg.sim.device = args.device
     cfg.enable_dwa_fallback = args.enable_dwa_fallback
-    env = gym.make(isaaclab_nav.TASK_ID, cfg=cfg)
+    cfg.viewer.origin_type = "asset_root"
+    cfg.viewer.env_index = 0
+    cfg.viewer.asset_name = "robot"
+    cfg.viewer.eye = (3.0, 3.0, 1.8)
+    cfg.viewer.lookat = (0.5, 0.0, 0.7)
+    cfg.viewer.resolution = (960, 540)
+    env = gym.make(
+        isaaclab_nav.TASK_ID,
+        cfg=cfg,
+        render_mode="rgb_array" if args.video else None,
+    )
+    if args.video:
+        env = gym.wrappers.RecordVideo(
+            env,
+            video_folder=args.video_folder,
+            step_trigger=lambda step: step == 0,
+            video_length=args.steps,
+            disable_logger=True,
+        )
     observation, _ = env.reset(seed=17)
     assert observation["policy"].shape == (args.num_envs, 483)
     assert torch.isfinite(observation["policy"]).all()
@@ -51,6 +73,8 @@ def main() -> None:
         assert observation["policy"].shape == (args.num_envs, 483)
         assert reward.shape == terminated.shape == truncated.shape == (args.num_envs,)
         assert torch.isfinite(observation["policy"]).all() and torch.isfinite(reward).all()
+        assert extras["collision_count"].shape == (args.num_envs,)
+        assert extras["termination_reason"].shape == (args.num_envs,)
         termination_count += int(terminated.sum())
         fallback_count += int(extras["fallback_used"].sum())
     if args.enable_dwa_fallback:

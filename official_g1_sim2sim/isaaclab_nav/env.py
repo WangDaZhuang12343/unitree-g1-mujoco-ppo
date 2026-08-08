@@ -13,6 +13,7 @@ from isaaclab.utils.math import euler_xyz_from_quat, quat_apply_inverse, subtrac
 from isaaclab_nav.contracts import BatchSafety, UpperObservationHistory
 from isaaclab_nav.env_cfg import G1VisualNavigationEnvCfg
 from isaaclab_nav.fallback import BatchedDwaFallback
+from isaaclab_nav.perception import LocalDistanceFieldConfig, local_distance_field
 from isaaclab_nav.walking import FrozenWalkingPolicy
 
 
@@ -27,6 +28,13 @@ class G1VisualNavigationEnv(DirectRLEnv):
         self._safety = BatchSafety(self.num_envs, self.device)
         self._upper_history = UpperObservationHistory(self.num_envs, self.device)
         self._dwa_fallback = BatchedDwaFallback(self.num_envs)
+        self._distance_field_cfg = LocalDistanceFieldConfig(
+            rear_range=cfg.costmap_rear_range,
+            front_range=cfg.costmap_front_range,
+            side_range=cfg.costmap_side_range,
+            inflation_radius=cfg.costmap_inflation_radius,
+            max_clearance=cfg.distance_field_max_clearance,
+        )
 
         self._desired_command = torch.zeros((self.num_envs, 3), device=self.device)
         self._previous_upper_action = torch.zeros_like(self._desired_command)
@@ -47,7 +55,21 @@ class G1VisualNavigationEnv(DirectRLEnv):
         self._collision = torch.zeros_like(self._success)
         self._fall = torch.zeros_like(self._success)
         self._fallback_used = torch.zeros_like(self._success)
+        self._invalid_action = torch.zeros_like(self._success)
+        self._collision_count = torch.zeros(
+            self.num_envs, dtype=torch.int32, device=self.device
+        )
+        self._termination_reason = torch.zeros(
+            self.num_envs, dtype=torch.int8, device=self.device
+        )
         self._undesired_body_ids, _ = self._contact_sensor.find_bodies(["(?!.*ankle.*).*"])
+        self._undesired_body_ids_tensor = torch.tensor(
+            self._undesired_body_ids, dtype=torch.long, device=self.device
+        )
+        self._collision_force = torch.zeros(self.num_envs, device=self.device)
+        self._collision_body_id = torch.full(
+            (self.num_envs,), -1, dtype=torch.int32, device=self.device
+        )
         self._episode_sums = {
             name: torch.zeros(self.num_envs, device=self.device)
             for name in ("progress", "success", "collision", "fall", "clearance", "action_rate")
@@ -78,12 +100,12 @@ class G1VisualNavigationEnv(DirectRLEnv):
         desired[:, 1] = 0.10 * normalized[:, 1]
         desired[:, 2] = 0.20 * normalized[:, 2]
         roll, pitch, _ = euler_xyz_from_quat(self._robot.data.root_quat_w)
-        distance_field, _ = self._distance_field()
+        _, _, clearance, _, _ = self._perception()
         close_obstacle = (
-            distance_field.amin(dim=(1, 2)) * self.cfg.forward_scanner.max_distance
-            < self.cfg.dwa_fallback_clearance_trigger
+            clearance < self.cfg.dwa_fallback_clearance_trigger
         ) & (desired[:, 0] > 0.1)
         self._fallback_used = (invalid | close_obstacle) & self.cfg.enable_dwa_fallback
+        self._invalid_action = invalid & ~self._fallback_used
         if self._fallback_used.any():
             hits = self._forward_scanner.data.ray_hits_w
             relative = hits - self._robot.data.root_pos_w[:, None, :]
@@ -160,14 +182,35 @@ class G1VisualNavigationEnv(DirectRLEnv):
         )
         self._robot.set_joint_position_target(target)
 
-    def _distance_field(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def _perception(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         hits = self._forward_scanner.data.ray_hits_w
-        starts = self._forward_scanner.data.pos_w[:, None, :]
-        distance = torch.linalg.norm(hits - starts, dim=-1)
-        valid = torch.isfinite(distance)
-        distance = torch.where(valid, distance, torch.full_like(distance, self.cfg.forward_scanner.max_distance))
-        normalized = (distance / self.cfg.forward_scanner.max_distance).clamp(0.0, 1.0)
-        return normalized.reshape(self.num_envs, 10, 10), valid
+        valid = torch.isfinite(hits).all(dim=-1)
+        relative = hits - self._robot.data.root_pos_w[:, None, :]
+        quat = self._robot.data.root_quat_w[:, None, :].expand(-1, relative.shape[1], -1)
+        points_body = quat_apply_inverse(quat, relative)
+        height_w = hits[..., 2] - self._terrain.env_origins[:, None, 2]
+        obstacle = (
+            valid
+            & (height_w >= self.cfg.obstacle_min_height)
+            & (height_w <= self.cfg.obstacle_max_height)
+            & (points_body[..., 0] >= -self.cfg.costmap_rear_range)
+            & (points_body[..., 0] <= self.cfg.costmap_front_range)
+            & (points_body[..., 1].abs() <= self.cfg.costmap_side_range)
+        )
+        distance_field, clearance = local_distance_field(
+            points_body, obstacle, self._distance_field_cfg
+        )
+        ground = valid & (height_w.abs() <= self.cfg.ground_height_tolerance)
+        valid_count = valid.sum(dim=1).clamp(min=1)
+        ground_ratio = ground.sum(dim=1).float() / valid_count
+        plane_ready = ground.sum(dim=1) >= 3
+        return distance_field, valid, clearance, ground_ratio, plane_ready
+
+    def _distance_field(self) -> tuple[torch.Tensor, torch.Tensor]:
+        distance_field, valid, _, _, _ = self._perception()
+        return distance_field, valid
 
     def _goal_body(self) -> tuple[torch.Tensor, torch.Tensor]:
         goal_b, _ = subtract_frame_transforms(
@@ -185,15 +228,15 @@ class G1VisualNavigationEnv(DirectRLEnv):
         return goal, distance
 
     def _upper_frame(self) -> torch.Tensor:
-        distance_field, valid = self._distance_field()
+        distance_field, valid, _, ground_ratio, plane_ready = self._perception()
         roll, pitch, _ = euler_xyz_from_quat(self._robot.data.root_quat_w)
         relative_height = self._robot.data.root_pos_w[:, 2] - self._terrain.env_origins[:, 2]
         safety_state = torch.stack((relative_height, roll, pitch), dim=1)
         perception_health = torch.stack(
             (
                 valid.float().mean(dim=1),
-                torch.ones(self.num_envs, device=self.device),
-                torch.ones(self.num_envs, device=self.device),
+                ground_ratio,
+                plane_ready.float(),
             ),
             dim=1,
         )
@@ -220,26 +263,47 @@ class G1VisualNavigationEnv(DirectRLEnv):
     def _contact_collision(self) -> torch.Tensor:
         forces = self._contact_sensor.data.net_forces_w_history
         magnitude = torch.linalg.norm(forces[:, :, self._undesired_body_ids], dim=-1)
-        return magnitude.amax(dim=(1, 2)) > self.cfg.collision_force_threshold
+        self._collision_force, flat_index = magnitude.flatten(1).max(dim=1)
+        body_subset_index = flat_index % len(self._undesired_body_ids)
+        self._collision_body_id = self._undesired_body_ids_tensor[body_subset_index].to(
+            torch.int32
+        )
+        return self._collision_force > self.cfg.collision_force_threshold
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         _, distance = self._goal_body()
-        self._success = distance <= self.cfg.success_radius
-        self._collision = self._contact_collision() & ~self._success
-        self._fall = self._safety.emergency_stopped & ~self._success
-        terminated = self._success | self._collision | self._fall
+        self._collision = self._contact_collision()
+        self._fall = self._safety.emergency_stopped & ~self._collision & ~self._invalid_action
+        self._success = (
+            (distance <= self.cfg.success_radius)
+            & ~self._collision
+            & ~self._fall
+            & ~self._invalid_action
+            & (self._collision_count == 0)
+        )
+        self._collision_count += self._collision.to(torch.int32)
+        terminated = self._success | self._collision | self._fall | self._invalid_action
         time_out = self.episode_length_buf >= self.max_episode_length - 1
+        self._termination_reason.zero_()
+        self._termination_reason[self._success] = 1
+        self._termination_reason[self._collision] = 2
+        self._termination_reason[self._fall] = 3
+        self._termination_reason[time_out & ~terminated] = 4
+        self._termination_reason[self._invalid_action] = 5
         self.extras["success"] = self._success.clone()
         self.extras["goal_distance"] = distance.clone()
         self.extras["fallback_used"] = self._fallback_used.clone()
+        self.extras["collision_count"] = self._collision_count.clone()
+        self.extras["collision_force"] = self._collision_force.clone()
+        self.extras["collision_body_id"] = self._collision_body_id.clone()
+        self.extras["termination_reason"] = self._termination_reason.clone()
         return terminated, time_out
 
     def _get_rewards(self) -> torch.Tensor:
         _, distance = self._goal_body()
         self._step_progress = self._previous_goal_distance - distance
         self._previous_goal_distance = distance
-        distance_field, _ = self._distance_field()
-        clearance = distance_field.amin(dim=(1, 2)) * self.cfg.forward_scanner.max_distance
+        _, _, clearance, _, _ = self._perception()
         parts = {
             "progress": self.cfg.progress_reward_scale * self._step_progress,
             "success": self.cfg.success_reward * self._success,
@@ -270,10 +334,16 @@ class G1VisualNavigationEnv(DirectRLEnv):
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
         count = len(env_ids)
-        self._goal_pos_w[env_ids] = self._terrain.env_origins[env_ids]
-        self._goal_pos_w[env_ids, 0] += torch.empty(count, device=self.device).uniform_(2.5, 3.5)
-        self._goal_pos_w[env_ids, 1] += torch.empty(count, device=self.device).uniform_(-1.0, 1.0)
+        valid_goals = self._terrain.flat_patches["goal"]
+        patch_ids = torch.randint(valid_goals.shape[2], (count,), device=self.device)
+        self._goal_pos_w[env_ids] = valid_goals[
+            self._terrain.terrain_levels[env_ids],
+            self._terrain.terrain_types[env_ids],
+            patch_ids,
+        ]
         self._goal_pos_w[env_ids, 2] += 0.05
+        self._forward_scanner.reset(env_ids)
+        self._contact_sensor.reset(env_ids)
         self._safety.reset(env_ids)
         self._walking_action[env_ids] = 0.0
         self._desired_command[env_ids] = 0.0
@@ -282,6 +352,11 @@ class G1VisualNavigationEnv(DirectRLEnv):
         self._collision[env_ids] = False
         self._fall[env_ids] = False
         self._fallback_used[env_ids] = False
+        self._invalid_action[env_ids] = False
+        self._collision_count[env_ids] = 0
+        self._collision_force[env_ids] = 0.0
+        self._collision_body_id[env_ids] = -1
+        self._termination_reason[env_ids] = 0
         self._dwa_fallback.reset(env_ids)
         _, distance = self._goal_body()
         self._previous_goal_distance[env_ids] = distance[env_ids]

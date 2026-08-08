@@ -42,6 +42,10 @@ def _official_g1_robot_cfg() -> ArticulationCfg:
         raise FileNotFoundError(f"Set UNITREE_ROS_PATH; missing official G1 URDF: {urdf}")
     cfg = UNITREE_G1_29DOF_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     cfg.spawn = UnitreeUrdfFileCfg(asset_path=str(urdf))
+    # The official collision meshes overlap during the frozen walking gait.
+    # Keep the external asset untouched, but prevent those internal contacts
+    # from being misreported as navigation collisions with terrain obstacles.
+    cfg.spawn.articulation_props.enabled_self_collisions = False
     return cfg
 
 
@@ -65,6 +69,16 @@ NAVIGATION_TERRAIN_CFG = TerrainGeneratorCfg(
             ),
             platform_width=1.6,
             platform_height=0.0,
+            flat_patch_sampling={
+                "goal": terrain_gen.FlatPatchSamplingCfg(
+                    num_patches=32,
+                    patch_radius=0.45,
+                    x_range=(2.5, 3.5),
+                    y_range=(-1.0, 1.0),
+                    z_range=(-0.05, 0.05),
+                    max_height_diff=0.02,
+                )
+            },
         )
     },
 )
@@ -116,14 +130,20 @@ class G1VisualNavigationEnvCfg(DirectRLEnvCfg):
         update_period=decimation * sim.dt,
         offset=RayCasterCfg.OffsetCfg(
             pos=(0.0576235, 0.01753, 0.42987),
-            rot=(0.91497, 0.0, 0.40352, 0.0),
+            # LidarPatternCfg already uses the robotics x-forward frame. The
+            # D435 URDF rotation describes a camera link and would pitch these
+            # rays another 47.6 degrees into the floor.
+            rot=(1.0, 0.0, 0.0, 0.0),
         ),
         ray_alignment="base",
         pattern_cfg=patterns.LidarPatternCfg(
-            channels=10,
-            vertical_fov_range=(-35.0, 8.0),
+            # Cover both the high-mounted camera's near-field blind spot and
+            # forward obstacles. Twenty channels keep low boxes visible before
+            # the hips reach them without making the GPU ray count excessive.
+            channels=20,
+            vertical_fov_range=(-75.0, 8.0),
             horizontal_fov_range=(-55.0, 55.0),
-            horizontal_res=11.0,
+            horizontal_res=5.0,
         ),
         max_distance=5.0,
         mesh_prim_paths=["/World/ground"],
@@ -137,6 +157,14 @@ class G1VisualNavigationEnvCfg(DirectRLEnvCfg):
     success_radius: float = 0.30
     collision_force_threshold: float = 20.0
     minimum_clearance: float = 0.30
+    obstacle_min_height: float = 0.035
+    obstacle_max_height: float = 1.50
+    ground_height_tolerance: float = 0.05
+    distance_field_max_clearance: float = 5.0
+    costmap_rear_range: float = 0.5
+    costmap_front_range: float = 4.0
+    costmap_side_range: float = 2.0
+    costmap_inflation_radius: float = 0.28
     enable_dwa_fallback: bool = False
     dwa_fallback_clearance_trigger: float = 0.22
 

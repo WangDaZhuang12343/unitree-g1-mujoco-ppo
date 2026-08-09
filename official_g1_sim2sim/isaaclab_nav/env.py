@@ -73,7 +73,15 @@ class G1VisualNavigationEnv(DirectRLEnv):
         )
         self._episode_sums = {
             name: torch.zeros(self.num_envs, device=self.device)
-            for name in ("progress", "success", "collision", "fall", "clearance", "action_rate")
+            for name in (
+                "progress",
+                "success",
+                "collision",
+                "fall",
+                "clearance",
+                "action_rate",
+                "action_bound",
+            )
         }
 
     def _setup_scene(self):
@@ -95,7 +103,8 @@ class G1VisualNavigationEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor):
         invalid = ~torch.isfinite(actions).all(dim=1)
-        normalized = torch.nan_to_num(actions.clone()).clamp(-1.0, 1.0)
+        self._raw_upper_action = torch.nan_to_num(actions.clone())
+        normalized = self._raw_upper_action.clamp(-1.0, 1.0)
         desired = torch.empty_like(normalized)
         desired[:, 0] = 0.225 * (normalized[:, 0] + 1.0)
         desired[:, 1] = 0.10 * normalized[:, 1]
@@ -314,6 +323,8 @@ class G1VisualNavigationEnv(DirectRLEnv):
             * (self.cfg.minimum_clearance - clearance).clamp(min=0.0),
             "action_rate": self.cfg.action_rate_penalty_scale
             * torch.square(self._current_upper_action - self._previous_upper_action).sum(dim=1),
+            "action_bound": self.cfg.action_bound_penalty_scale
+            * torch.square((self._raw_upper_action.abs() - 1.0).clamp(min=0.0)).sum(dim=1),
         }
         for name, value in parts.items():
             self._episode_sums[name] += value

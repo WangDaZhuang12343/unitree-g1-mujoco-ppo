@@ -82,13 +82,14 @@ def _write_report(output: Path, rows: list[dict[str, object]], planner: str) -> 
         "- `dynamic_obstacle` is not scored: Isaac Lab 2.3 RayCaster only sees the static terrain mesh; "
         "scoring a moving rigid body as sensed would be invalid.",
         "",
-        "| Scenario | Status | Success | Collision | Time (s) | Final distance (m) | Min clearance (m) |",
-        "|---|---|---:|---:|---:|---:|---:|",
+        "| Scenario | Status | Success | Survived | Collision | Time (s) | Final distance (m) | Min clearance (m) |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         lines.append(
             f"| {row['scenario']} | {row['status']} | {int(bool(row['success']))} | "
-            f"{row['collision_count']} | {float(row['elapsed_sim_s']):.2f} | "
+            f"{int(bool(row['survived']))} | {row['collision_count']} | "
+            f"{float(row['elapsed_sim_s']):.2f} | "
             f"{float(row['final_distance_m']):.3f} | {float(row['min_clearance_m']):.3f} |"
         )
     lines += [

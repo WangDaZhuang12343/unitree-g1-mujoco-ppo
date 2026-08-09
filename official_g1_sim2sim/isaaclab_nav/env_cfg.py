@@ -172,13 +172,17 @@ class G1VisualNavigationEnvCfg(DirectRLEnvCfg):
     benchmark_scenarios: tuple[str, ...] = ()
     benchmark_seed: int = 7
 
-    progress_reward_scale: float = 30.0
-    success_reward: float = 25.0
-    collision_penalty: float = -20.0
-    fall_penalty: float = -20.0
-    clearance_penalty_scale: float = -2.0
+    # A collision must cost more than all progress available in the longest
+    # 6.5 m frozen benchmark scene. Otherwise rushing toward the goal and
+    # crashing is a positive-return shortcut (6.5 * 30 - 20 previously).
+    progress_reward_scale: float = 15.0
+    success_reward: float = 100.0
+    collision_penalty: float = -150.0
+    fall_penalty: float = -150.0
+    clearance_penalty_scale: float = -5.0
     action_rate_penalty_scale: float = -0.05
-    timeout_penalty: float = -2.0
+    action_bound_penalty_scale: float = -0.25
+    timeout_penalty: float = -10.0
 
     def __post_init__(self):
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15

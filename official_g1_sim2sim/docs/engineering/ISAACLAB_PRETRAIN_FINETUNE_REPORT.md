@@ -60,6 +60,20 @@ reward由progress、success、collision、fall、clearance、action-rate和timeo
 
 最终续训段最近20轮mean reward约`50.63`，明显高于100轮末的`23.23`，但冻结benchmark反而退化。这证明仅观察训练reward会给出错误结论；checkpoint `model_498.pt`及其ONNX均不得标记为deployable。
 
+## 安全reward消融（2026-08-09）
+
+离线动作分析显示，PPO在benchmark教师观测上的三维MAE从BC的约`[0.223, 0.175, 0.117]`漂移到500轮的`[0.531, 0.484, 0.290]`，actor越界输出也明显增加。旧reward还存在确定性的激励漏洞：最长冻结场景目标为6.5米，直线progress最多可获得`6.5×30=195`，而碰撞仅罚`-20`，所以“向目标冲刺后碰撞”仍是高正回报策略。
+
+在不改变observation、action、Walking ONNX、Safety或DWA的前提下，安全reward v1做了以下最小修正：progress `30→15`、success `25→100`、collision/fall `-20→-150`、clearance `-2→-5`、timeout `-2→-10`，并增加`-0.25`的actor输出越界平方惩罚。碰撞代价现在高于6.5米场景可获得的全部progress。
+
+| 策略 | 累计PPO timesteps | 静态成功 | 碰撞场景 | 结果 |
+|---|---:|---:|---:|---|
+| BC + 旧reward约100轮 | 76,800 | 0/10 | 8/10 | 训练reward为正但碰撞占主导 |
+| BC + 安全reward约100轮 | 76,800 | 0/10 | 5/10 | 当前最低碰撞；其余场景主要跌倒 |
+| BC + 安全reward约300轮 | 230,400 | 0/10 | 7/10 | 继续训练后退化，停止扩训 |
+
+安全reward 100轮的`single_obstacle`可做到零碰撞、最小净空0.292米，但在距目标1.274米时跌倒；`triple_obstacle`完整批测零碰撞并到达距目标0.502米，但仍未满足0.30米成功合同。该消融验证了reward漏洞的影响，但没有产生可部署策略。后续实验应以100轮checkpoint为早停基线，引入独立benchmark callback，而不是继续当前run。
+
 第11个`dynamic_obstacle`仍标记为`unsupported_dynamic_perception`，因为Isaac Lab 2.3 RayCaster不扫描运动刚体，不纳入成功率。
 
 ## 新增工具

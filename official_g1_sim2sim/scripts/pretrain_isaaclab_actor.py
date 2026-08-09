@@ -22,6 +22,7 @@ from isaaclab_nav.pretraining import (
     make_actor_checkpoint,
     observation_moments,
 )
+from isaaclab_nav.walking_compatibility import POLICY_TRAINING_PROFILE
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,7 +43,9 @@ def main() -> None:
     if args.epochs <= 0 or args.batch_size <= 0 or not 0.0 < args.validation_fraction < 1.0:
         raise ValueError("invalid training arguments")
     torch.manual_seed(args.seed)
-    observation, action, trajectory_id = load_teacher_datasets(args.datasets)
+    observation, action, trajectory_id = load_teacher_datasets(
+        args.datasets, expected_actuator_profile=POLICY_TRAINING_PROFILE
+    )
     trajectories = torch.unique(trajectory_id)
     if len(trajectories) < 2:
         raise ValueError("at least two independent trajectories are required")
@@ -92,6 +95,7 @@ def main() -> None:
         sample_count=len(training_ids),
         validation_mae=validation_mae,
     )
+    checkpoint["metadata"]["walking_actuator_profile"] = POLICY_TRAINING_PROFILE
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(checkpoint, output)

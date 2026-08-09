@@ -7,6 +7,7 @@ import copy
 
 WALKING_ONNX_SHA256 = "610c27e463a8f666aa50a06346678c00b4df3859f10b54bcc1f817c28251406f"
 POLICY_RELEASE_COMMIT = "e3c0fe49b1e33e8fb985a4b43aaf9f93f94e3a7a"
+POLICY_TRAINING_PROFILE = "policy_training_2025_07"
 POLICY_TRAINING_EFFORT_LIMITS = {"legs": 300, "feet": 20, "arms": 300}
 
 
@@ -82,7 +83,7 @@ def apply_actuator_profile(robot_cfg, profile: str) -> None:
 
         robot_cfg.actuators = copy.deepcopy(UNITREE_G1_29DOF_CFG.actuators)
         return
-    if profile == "policy_training_2025_07":
+    if profile == POLICY_TRAINING_PROFILE:
         robot_cfg.actuators = policy_training_actuators()
         return
     raise ValueError(f"unknown actuator profile: {profile}")

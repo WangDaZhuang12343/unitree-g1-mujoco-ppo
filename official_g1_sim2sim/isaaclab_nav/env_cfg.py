@@ -17,7 +17,7 @@ from isaaclab.utils import configclass
 
 from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG, UnitreeUrdfFileCfg
 
-from isaaclab_nav.walking_compatibility import apply_actuator_profile
+from isaaclab_nav.walking_compatibility import POLICY_TRAINING_PROFILE, apply_actuator_profile
 
 
 def _default_walking_policy() -> str:
@@ -155,7 +155,7 @@ class G1VisualNavigationEnvCfg(DirectRLEnvCfg):
     walking_policy_path: str = _default_walking_policy()
     # The released ONNX was trained at unitree_rl_lab e3c0fe4. Upstream later
     # replaced its actuator limits without updating the policy artifact.
-    walking_actuator_profile: str = "policy_training_2025_07"
+    walking_actuator_profile: str = POLICY_TRAINING_PROFILE
     walking_action_scale: float = 0.25
     walking_decimation: int = 4
     goal_range: float = 4.0

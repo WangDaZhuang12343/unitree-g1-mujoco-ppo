@@ -12,12 +12,14 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from isaaclab_nav.pretraining import ACTOR_INPUT_DIM, actor_from_rsl_rl_checkpoint
+from isaaclab_nav.walking_compatibility import POLICY_TRAINING_PROFILE
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--walking_actuator_profile", default=POLICY_TRAINING_PROFILE)
     args = parser.parse_args()
     if args.output.suffix != ".onnx":
         raise ValueError("--output must end in .onnx")
@@ -34,6 +36,7 @@ def main() -> None:
         opset_version=17,
     )
     metadata["onnx"] = str(output)
+    metadata["walking_actuator_profile"] = args.walking_actuator_profile
     output.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print("ISAACLAB_ACTOR_EXPORT_OK", metadata)
 

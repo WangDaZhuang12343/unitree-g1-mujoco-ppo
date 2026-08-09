@@ -139,13 +139,15 @@ def run_collection(args: argparse.Namespace, simulation_app) -> None:
             str(args.rollout_policy_onnx.resolve()) if args.rollout_policy_onnx else "dwa_teacher"
         ),
         teacher_rollout_probability=np.asarray(args.teacher_rollout_probability, dtype=np.float32),
-        format=np.asarray("g1_isaaclab_dwa_teacher_v1"),
+        walking_actuator_profile=np.asarray(cfg.walking_actuator_profile),
+        format=np.asarray("g1_isaaclab_dwa_teacher_v2"),
     )
     print(
         "ISAACLAB_TEACHER_DATA_OK",
         {"samples": len(observation_array), "trajectories": int(np.unique(trajectory_array).size),
          "observation": observation_array.shape, "action": action_array.shape,
          "rollout_policy": "learner_mixed" if rollout_session is not None else "dwa_teacher",
+         "walking_actuator_profile": cfg.walking_actuator_profile,
          "teacher_rollout_probability": args.teacher_rollout_probability,
          "output": str(output)},
     )

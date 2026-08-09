@@ -4,7 +4,7 @@
 
 ## 结论
 
-“冻结DWA教师行为克隆 + actor-only PPO finetune”接入已经完成并通过技术验证，但当前策略没有通过部署验收。行为克隆、PPO微调、教师锚定和Isaac原生DAgger在10个静态确定性场景中均为`0/10`。根因现已定位到官方Walking artifact合同漂移：ONNX首次发布时的执行器配置后来被替换，但ONNX哈希没有更新。恢复训练期执行器合同后，28组Walking矩阵由`23/28`恢复为`28/28`，冻结DWA由`0/10`恢复为`1/10`且10个场景均零碰撞、零跌倒。Walking接入卡点已经解除，但DWA教师上界仍不足以直接启动大规模训练。
+“冻结DWA教师行为克隆 + actor-only PPO finetune”接入已经完成并通过技术验证，但当前策略没有通过部署验收。根因已定位到官方Walking artifact合同漂移：ONNX首次发布时的执行器配置后来被替换，但ONNX哈希没有更新。恢复训练期执行器合同后，28组Walking矩阵由`23/28`恢复为`28/28`，冻结DWA由`0/10`恢复为`1/10`且10个场景均零碰撞、零跌倒。随后用正确合同重新采集10k数据并完成BC+100轮PPO，学习策略仍为`0/10`且9个场景碰撞。Walking接入卡点已经解除，但当前上层教师与训练路线仍不具备部署价值。
 
 保留全部预训练/微调工具链，但暂停继续堆叠PPO轮数、锚定系数或同一DWA教师数据。在教师自身通过Isaac闭环验收前，这些实验没有形成可学习的成功上界。
 
@@ -134,6 +134,18 @@ MuJoCo用同一ONNX完成28/28，说明策略文件本身没有损坏。官方US
 
 在兼容合同上重跑完整冻结DWA benchmark：`narrow_corridor`在13秒成功，总计`1/10`；其余9项timeout，所有10项均无碰撞、无跌倒。教师成功上界已经从零恢复为非零，但仍只覆盖单一场景，当前应先改善教师状态覆盖或依靠安全reward探索，不能把1/10误报为可部署导航。
 
+### 兼容环境BC与PPO恢复试验
+
+教师数据格式升级为`g1_isaaclab_dwa_teacher_v2`，强制记录`walking_actuator_profile`；BC预训练和PPO教师锚定入口均拒绝缺失或不匹配的执行器元数据，避免把旧错误环境数据混入新实验。
+
+在修复后的默认URDF环境先采集2,000条benchmark教师样本、20条独立轨迹，并进行40轮小规模BC初筛：validation normalized-action MAE为`0.251726`。完整确定性benchmark结果仍为`1/10`，只复现教师的`narrow_corridor`成功；4个场景记录碰撞，`dead_end`在15秒因右膝碰撞终止。
+
+为排除数据量不足，又补采8,000条随机地形数据。合计10,000条、105条轨迹的BC validation MAE降到`0.094883`，但闭环仍为`1/10`，8个场景记录碰撞、6个场景直接碰撞终止。离线拟合改善没有转化为闭环安全性。
+
+最后从10k BC actor执行100轮安全reward PPO finetune，共76,800 timesteps、约180 steps/s。冻结benchmark退化为`0/10`：9个场景记录并因碰撞终止，仅`narrow_corridor`存活但超时。该checkpoint明确不可部署、不发布。
+
+这完成了兼容环境下对方案C的实测否证：修复Walking合同是必要条件，但“当前DWA数据→BC→100轮PPO”仍不能得到可部署策略。继续增加同类教师样本或PPO轮数不值得；需要改变上层训练课程或获得更强的成功教师，但不得修改Walking、Safety和冻结DWA baseline。
+
 ### 关节顺序排除项
 
 已复核官方`deploy.yaml`、G1资产配置、策略训练Action/Observation配置和配置导出代码，没有发现Isaac adapter漏做reorder：
@@ -164,8 +176,8 @@ MuJoCo用同一ONNX完成28/28，说明策略文件本身没有损坏。官方US
 
 下一步应在同一架构内依次执行：
 
-1. 用`policy_training_2025_07`重新采集Isaac教师和DAgger数据，禁止混用旧执行器合同下的数据。
-2. 保留冻结DWA算法不变，把其`1/10`视为warm-start而非最终上界；先做小规模BC和约100轮PPO安全探索。
-3. 每个候选必须跑冻结benchmark callback；只有成功率超过1/10且保持零碰撞趋势才继续扩训。
+1. 停止当前同分布DWA BC、DAgger堆量和继续PPO扩训；兼容环境10k+100轮实验已经给出否定结果。
+2. 下一轮上层RL必须引入由易到难的成功课程或新的成功教师，同时保持输出仍为`vx/vy/omega`，不得改成29DOF端到端训练。
+3. 每个候选必须跑冻结benchmark callback；只有成功率超过DWA的1/10且碰撞明显低于BC基线才继续扩训。
 4. `current`执行器配置只用于兼容性对照，除非获得与其成套训练的新Walking checkpoint，否则不用于本项目冻结ONNX训练。
-5. 在学习策略达到稳定非零成功率前，不替换MuJoCo稳定baseline；Isaac中的DWA fallback也不能宣称已通过部署验收。
+5. 不替换MuJoCo稳定baseline；Isaac中的DWA继续作为安全fallback，但不能宣称已通过部署验收。

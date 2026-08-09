@@ -59,6 +59,7 @@ if init_checkpoint is not None:
     from torch import nn
 
     from isaaclab_nav.pretraining import load_actor_initialization, load_teacher_datasets
+    from isaaclab_nav.walking_compatibility import POLICY_TRAINING_PROFILE
 
     original_runner_init = OnPolicyRunner.__init__
 
@@ -72,7 +73,9 @@ if init_checkpoint is not None:
         print(f"[INFO] Initialized PPO actor only from {init_checkpoint}: {metadata}")
         print(f"[INFO] PPO finetune settings: {finetune_settings}")
         if teacher_datasets:
-            teacher_observation, teacher_action, _ = load_teacher_datasets(teacher_datasets)
+            teacher_observation, teacher_action, _ = load_teacher_datasets(
+                teacher_datasets, expected_actuator_profile=POLICY_TRAINING_PROFILE
+            )
             update_losses: list[float] = []
 
             def _add_teacher_gradient(_optimizer, _args, _kwargs):

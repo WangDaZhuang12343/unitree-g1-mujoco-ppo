@@ -29,6 +29,7 @@ from isaaclab_nav.pretraining import (
 from isaaclab_nav.walking_compatibility import (
     POLICY_RELEASE_COMMIT,
     POLICY_TRAINING_EFFORT_LIMITS,
+    POLICY_TRAINING_PROFILE,
     WALKING_ONNX_SHA256,
 )
 from navigation.scenarios import get_scenario, scenario_names
@@ -41,6 +42,7 @@ class IsaacLabContractsTest(unittest.TestCase):
         )
         self.assertEqual(len(WALKING_ONNX_SHA256), 64)
         self.assertEqual(POLICY_RELEASE_COMMIT[:8], "e3c0fe49")
+        self.assertEqual(POLICY_TRAINING_PROFILE, "policy_training_2025_07")
 
     def test_filtered_contact_flat_index_recovers_body_axis(self):
         flat_index = torch.arange(12)
@@ -121,6 +123,22 @@ class IsaacLabContractsTest(unittest.TestCase):
         self.assertEqual(observation.shape, (4, ACTOR_INPUT_DIM))
         self.assertEqual(action.shape, (4, 3))
         np.testing.assert_array_equal(trajectory_id.numpy(), [0, 1, 2, 3])
+
+    def test_teacher_dataset_rejects_wrong_actuator_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "teacher_v2.npz"
+            np.savez(
+                path,
+                format=np.asarray("g1_isaaclab_dwa_teacher_v2"),
+                walking_actuator_profile=np.asarray("current"),
+                observation=np.zeros((2, ACTOR_INPUT_DIM), dtype=np.float32),
+                action=np.zeros((2, 3), dtype=np.float32),
+                trajectory_id=np.asarray([0, 1], dtype=np.int64),
+            )
+            with self.assertRaisesRegex(ValueError, "expected actuator profile"):
+                load_teacher_datasets(
+                    [path], expected_actuator_profile="policy_training_2025_07"
+                )
 
     def test_benchmark_contract_covers_all_frozen_scenarios(self):
         names = scenario_names()

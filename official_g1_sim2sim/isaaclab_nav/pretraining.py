@@ -16,20 +16,31 @@ ACTOR_HIDDEN_DIMS = (512, 256, 128)
 ACTOR_CHECKPOINT_FORMAT = "g1_isaaclab_navigation_actor_v1"
 RSL_RL_EXPORT_FORMAT = "g1_isaaclab_navigation_rsl_rl_export_v1"
 NORMALIZER_EPS = 1.0e-2
+TEACHER_DATASET_FORMAT_V1 = "g1_isaaclab_dwa_teacher_v1"
+TEACHER_DATASET_FORMAT_V2 = "g1_isaaclab_dwa_teacher_v2"
 
 
-def load_teacher_datasets(paths: list[str | Path]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def load_teacher_datasets(
+    paths: list[str | Path], expected_actuator_profile: str | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Load and concatenate validated teacher datasets with globally unique trajectories."""
 
     if not paths:
         raise ValueError("at least one teacher dataset is required")
     observations, actions, trajectory_ids = [], [], []
+    dataset_profiles: set[str] = set()
     trajectory_offset = 0
     for value in paths:
         path = Path(value)
         with np.load(path, allow_pickle=False) as payload:
-            if str(payload["format"]) != "g1_isaaclab_dwa_teacher_v1":
+            dataset_format = str(payload["format"])
+            if dataset_format not in (TEACHER_DATASET_FORMAT_V1, TEACHER_DATASET_FORMAT_V2):
                 raise ValueError(f"unsupported dataset format in {path}")
+            if dataset_format == TEACHER_DATASET_FORMAT_V2:
+                profile = str(payload["walking_actuator_profile"])
+                dataset_profiles.add(profile)
+            elif expected_actuator_profile is not None:
+                raise ValueError(f"legacy dataset lacks actuator profile metadata: {path}")
             observation = np.asarray(payload["observation"], dtype=np.float32)
             action = np.asarray(payload["action"], dtype=np.float32)
             ids = np.asarray(payload["trajectory_id"], dtype=np.int64)
@@ -48,6 +59,12 @@ def load_teacher_datasets(paths: list[str | Path]) -> tuple[torch.Tensor, torch.
         observations.append(observation)
         actions.append(action)
         trajectory_ids.append(ids)
+    if len(dataset_profiles) > 1:
+        raise ValueError(f"teacher datasets mix actuator profiles: {sorted(dataset_profiles)}")
+    if expected_actuator_profile is not None and dataset_profiles != {expected_actuator_profile}:
+        raise ValueError(
+            f"expected actuator profile {expected_actuator_profile!r}, got {sorted(dataset_profiles)}"
+        )
     return (
         torch.from_numpy(np.concatenate(observations)),
         torch.from_numpy(np.concatenate(actions)),

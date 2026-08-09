@@ -18,6 +18,15 @@ UPPER_GOAL_DIM = 3
 UPPER_OBSERVATION_DIM = UPPER_FRAME_DIM * UPPER_HISTORY_LENGTH + UPPER_GOAL_DIM
 
 
+def collision_body_subset_index(
+    flat_force_index: torch.Tensor, num_filters: int, num_bodies: int
+) -> torch.Tensor:
+    """Recover the body axis after flattening history/body/filter contact forces."""
+    if num_filters <= 0 or num_bodies <= 0:
+        raise ValueError("num_filters and num_bodies must be positive")
+    return (flat_force_index // num_filters) % num_bodies
+
+
 @dataclass(frozen=True)
 class BatchSafetyConfig:
     """Tensor equivalent of the immutable MuJoCo ``SafetyConfig``."""

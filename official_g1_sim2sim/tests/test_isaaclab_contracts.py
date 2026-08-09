@@ -11,6 +11,7 @@ from isaaclab_nav.contracts import (
     UPPER_OBSERVATION_DIM,
     BatchSafety,
     UpperObservationHistory,
+    collision_body_subset_index,
 )
 from isaaclab_nav.fallback import BatchedDwaFallback
 from isaaclab_nav.perception import LocalDistanceFieldConfig, local_distance_field
@@ -29,6 +30,11 @@ from navigation.scenarios import get_scenario, scenario_names
 
 
 class IsaacLabContractsTest(unittest.TestCase):
+    def test_filtered_contact_flat_index_recovers_body_axis(self):
+        flat_index = torch.arange(12)
+        actual = collision_body_subset_index(flat_index, num_filters=2, num_bodies=3)
+        torch.testing.assert_close(actual, torch.tensor([0, 0, 1, 1, 2, 2] * 2))
+
     def test_navigation_action_conversion_round_trip(self):
         command = torch.tensor([[0.0, -0.1, -0.2], [0.225, 0.0, 0.0], [0.45, 0.1, 0.2]])
         action = physical_command_to_normalized_action(command)

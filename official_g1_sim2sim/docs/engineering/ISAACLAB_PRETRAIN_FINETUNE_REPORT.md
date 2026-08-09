@@ -1,10 +1,10 @@
 # Isaac Lab导航策略预训练与微调报告
 
-日期：2026-08-08；分支：`isaaclab-port`。
+日期：2026-08-09；分支：`isaaclab-port`。
 
 ## 结论
 
-“冻结DWA教师行为克隆 + actor-only PPO finetune”接入已经完成并通过技术验证，但当前策略没有通过部署验收。行为克隆、PPO微调、教师锚定和Isaac原生DAgger在10个静态确定性场景中均为`0/10`。更关键的是，冻结DWA直接驱动同一Isaac环境也只有`0/10`；因此主要卡点已从“PPO训练速度或教师遗忘”收敛为“MuJoCo DWA运动学假设与Isaac中的Walking实际可执行域不匹配”。
+“冻结DWA教师行为克隆 + actor-only PPO finetune”接入已经完成并通过技术验证，但当前策略没有通过部署验收。行为克隆、PPO微调、教师锚定和Isaac原生DAgger在10个静态确定性场景中均为`0/10`。更关键的是，冻结DWA直接驱动同一Isaac环境也只有`0/10`；MuJoCo同一Walking ONNX在28组命令中为`28/28`稳定，而Unitree官方ManagerBased Isaac任务也只有`23/28`。因此主要卡点已从“PPO训练速度或教师遗忘”收敛为“当前Isaac版本/资产中的Walking可执行域与MuJoCo DWA假设及策略训练artifact不兼容”。
 
 保留全部预训练/微调工具链，但暂停继续堆叠PPO轮数、锚定系数或同一DWA教师数据。在教师自身通过Isaac闭环验收前，这些实验没有形成可学习的成功上界。
 
@@ -104,23 +104,24 @@ reward由progress、success、collision、fall、clearance、action-rate和timeo
 
 这构成当前最重要的反证：即使学生完全复现教师动作，也无法满足Isaac闭环成功合同。继续优化BC loss、DAgger采样量或PPO训练时长不能消除这个上界问题。
 
-## Frozen Walking可执行域诊断（2026-08-09）
+## Frozen Walking跨后端可执行域诊断（2026-08-09）
 
-平地12秒命令矩阵保持同一个Frozen Walking ONNX、Isaac G1资产和Safety链路，只隔离上层导航规划：
+共享28组平地命令矩阵覆盖stand、`vx=0.15～0.45`、正负`vy`、正负`omega`及四种耦合边界组合。每项运行12秒并在前2秒后统计实际body velocity。所有对照保持同一个Frozen Walking ONNX，未修改Walking、Safety或DWA。
 
-| 物理命令 | 结果 |
-|---|---|
-| stand | 稳定12秒 |
-| `vx=0.25` | 稳定12秒 |
-| `vx=0.45` | 4.8秒左膝触地 |
-| `vx=0.25, vy=0.10` | 稳定12秒 |
-| `vx=0.25, vy=-0.10` | 7.9秒跌倒 |
-| `vx=0.25, omega=0.20` | 稳定12秒 |
-| `vx=0.25, omega=-0.20` | 稳定12秒 |
-| `vx=0.25, vy=0.10, omega=0.20` | 稳定12秒 |
-| `vx=0.25, vy=-0.10, omega=-0.20` | 10.6秒右膝触地 |
+| 后端/资产配置 | 12秒存活 | 关键结果 |
+|---|---:|---|
+| MuJoCo稳定baseline资产 | 28/28 | 全部稳定，速度跟踪明显优于Isaac |
+| Direct环境当前rev1 URDF，自碰撞关闭 | 16/28 | `vx>=0.35`和负向`vy`组合明显不稳定 |
+| Direct环境官方rev1 USD，自碰撞关闭 | 23/28 | 资产替换改善稳定性，但仍明显过冲 |
+| Direct环境官方USD，自碰撞开启，忽略接触终止 | 26/28 | 仅`lateral_n075`和`coupled_yn_wp`约11秒失败 |
+| Direct环境官方USD，自碰撞开启，仅过滤外部地形接触 | 26/28 | 与忽略接触结果一致，证明内部自碰撞不再被误判为障碍碰撞 |
+| 官方ManagerBasedRLEnv + 官方USD，干净推理 | 23/28 | 同样过冲且5组因bad orientation终止 |
 
-Walking在Isaac中存在明显的左右不对称，且DWA常用的最大前进速度不稳定。与此同时，Isaac教师标签大量饱和在最大`vx/vy/omega`。因此DWA认为可执行的速度集合大于Frozen Walking在当前Isaac接入中的实测稳定集合。
+MuJoCo用同一ONNX完成28/28，说明策略文件本身没有损坏。官方USD相较当前URDF确实改善Isaac稳定域，但把完整冻结DWA benchmark切换到“官方USD + 自碰撞 + 外部接触过滤”后仍为`0/10`：8个场景发生真实外部碰撞、3个fall、2个timeout。因此不能仅凭26/28命令存活就把资产切换提升为生产默认。
+
+为排除Direct adapter的历史、动作时序或执行器应用差异，新增`benchmark_official_manager_walking.py`，直接实例化Unitree官方`RobotPlayEnvCfg`，向官方`base_velocity` command term写入同一28组物理命令，并把官方480维manager observation逐环境送入未改写ONNX。干净推理结果仍只有23/28：`forward_030`、`forward_045`、`lateral_n025`和两个负向`vy`耦合命令失败；全矩阵平均绝对速度误差约为`vx=0.197`、`vy=0.155`、`omega=0.085`。
+
+这项结果排除了“当前Direct adapter是主要失败源”的假设。剩余最可能原因是策略训练时的Isaac/PhysX/Unitree资产版本与当前Isaac Sim 5.1、Isaac Lab 2.3及仓库artifact不完全兼容，或发布策略本身在边界命令上没有足够裕量。当前不应通过修改ONNX、重排关节或继续PPO扩训来掩盖该兼容性问题。
 
 ### 关节顺序排除项
 
@@ -140,6 +141,9 @@ Walking在Isaac中存在明显的左右不对称，且DWA常用的最大前进�
 - `scripts/pretrain_isaaclab_actor.py`：trajectory级切分、行为克隆、actor-only checkpoint和ONNX导出。
 - `scripts/train_isaaclab_nav.py --init_checkpoint`：只初始化actor、actor normalizer和noise std。
 - `scripts/export_isaaclab_actor.py`：从RSL-RL checkpoint导出包含actor normalizer的动态batch ONNX。
+- `scripts/benchmark_isaaclab_walking_commands.py`：Direct环境28组Walking命令稳定域与速度跟踪矩阵。
+- `scripts/benchmark_mujoco_walking_commands.py`：用同一命令和ONNX生成MuJoCo后端对照。
+- `scripts/benchmark_official_manager_walking.py`：直接运行Unitree官方ManagerBased任务，排查Direct adapter差异。
 
 本地生成的数据、checkpoint、日志和runs由`.gitignore`排除，避免把失败策略误当成发布模型。ONNX与PyTorch推理的实测最大绝对误差为`2.86e-6`。
 
@@ -149,7 +153,7 @@ Walking在Isaac中存在明显的左右不对称，且DWA常用的最大前进�
 
 下一步应在同一架构内依次执行：
 
-1. 以官方Walking训练资产为基准，继续核对当前URDF导入的惯量、碰撞体、关节限位、执行器参数、physics material和仿真步长；先解释左右不对称，不改ONNX本体。
+1. 查明该ONNX的准确训练提交、Isaac Sim/Isaac Lab/PhysX版本及官方资产哈希，并在匹配版本复测官方ManagerBased矩阵；先解释版本兼容性和左右不对称，不改ONNX本体。
 2. 在不修改Safety和DWA算法的前提下，测量更细粒度的`vx/vy/omega`稳定包络，并将“规划命令是否超出实测Walking稳定域”作为接入兼容性结论。
 3. 只有在冻结DWA使用可执行命令后能在Isaac benchmark取得非零成功率，才重新生成教师数据并恢复BC/DAgger/PPO finetune。
 4. 恢复训练后，每个候选先跑约100轮，并用冻结benchmark callback而非训练reward决定是否继续。

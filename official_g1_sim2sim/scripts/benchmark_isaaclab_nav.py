@@ -22,6 +22,10 @@ parser.add_argument("--seed", type=int, default=7)
 parser.add_argument("--planner", choices=("dwa", "onnx"), default="dwa")
 parser.add_argument("--policy_onnx", type=Path)
 parser.add_argument("--duration", type=float, help="shorten every scenario for smoke testing")
+parser.add_argument("--robot_asset", choices=("current_urdf", "official_usd"), default="current_urdf")
+parser.add_argument("--unitree_model", type=Path, default=Path("/home/qc/qc/project/unitree_model"))
+parser.add_argument("--self_collisions", action="store_true")
+parser.add_argument("--external_contact_filter", action="store_true")
 parser.add_argument("--output", type=Path, default=Path("runs/isaaclab_navigation_benchmark"))
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -77,6 +81,9 @@ def _write_report(output: Path, rows: list[dict[str, object]], planner: str) -> 
         "# Isaac Lab G1 Navigation Benchmark",
         "",
         f"- Planner: `{planner}`",
+        f"- Robot asset: `{args.robot_asset}`",
+        f"- Self collisions: `{args.self_collisions}`",
+        f"- External contact filter: `{args.external_contact_filter}`",
         f"- Completed static scenarios: {len(completed)}/{static_count}",
         f"- Static success rate: {successes}/{len(completed) if completed else 0}",
         "- `dynamic_obstacle` is not scored: Isaac Lab 2.3 RayCaster only sees the static terrain mesh; "
@@ -116,6 +123,20 @@ def main() -> None:
         return
 
     cfg = G1VisualNavigationEnvCfg()
+    if args.robot_asset == "official_usd":
+        from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG
+
+        usd = (
+            args.unitree_model.expanduser().resolve()
+            / "G1/29dof/usd/g1_29dof_rev_1_0/g1_29dof_rev_1_0.usd"
+        )
+        if not usd.is_file():
+            raise FileNotFoundError(usd)
+        cfg.robot = UNITREE_G1_29DOF_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+        cfg.robot.spawn.usd_path = str(usd)
+        cfg.robot.spawn.articulation_props.enabled_self_collisions = args.self_collisions
+    if args.external_contact_filter:
+        cfg.contact_sensor.filter_prim_paths_expr = ["/World/ground/terrain/mesh"]
     cfg.scene.num_envs = len(static_scenes)
     cfg.sim.device = args.device
     cfg.terrain.terrain_generator = make_benchmark_terrain_cfg(static_scenes, args.seed)

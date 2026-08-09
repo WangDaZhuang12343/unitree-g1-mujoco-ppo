@@ -10,7 +10,11 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import euler_xyz_from_quat, quat_apply_inverse, subtract_frame_transforms
 
-from isaaclab_nav.contracts import BatchSafety, UpperObservationHistory
+from isaaclab_nav.contracts import (
+    BatchSafety,
+    UpperObservationHistory,
+    collision_body_subset_index,
+)
 from isaaclab_nav.env_cfg import G1VisualNavigationEnvCfg
 from isaaclab_nav.fallback import BatchedDwaFallback
 from isaaclab_nav.perception import LocalDistanceFieldConfig, local_distance_field
@@ -271,10 +275,19 @@ class G1VisualNavigationEnv(DirectRLEnv):
         return {"policy": self._upper_history.observation(goal)}
 
     def _contact_collision(self) -> torch.Tensor:
-        forces = self._contact_sensor.data.net_forces_w_history
-        magnitude = torch.linalg.norm(forces[:, :, self._undesired_body_ids], dim=-1)
+        filtered = self._contact_sensor.data.force_matrix_w_history
+        if filtered is not None:
+            forces = filtered[:, :, self._undesired_body_ids]
+            magnitude = torch.linalg.norm(forces, dim=-1)
+            num_filters = forces.shape[-2]
+        else:
+            forces = self._contact_sensor.data.net_forces_w_history
+            magnitude = torch.linalg.norm(forces[:, :, self._undesired_body_ids], dim=-1)
+            num_filters = 1
         self._collision_force, flat_index = magnitude.flatten(1).max(dim=1)
-        body_subset_index = flat_index % len(self._undesired_body_ids)
+        body_subset_index = collision_body_subset_index(
+            flat_index, num_filters, len(self._undesired_body_ids)
+        )
         self._collision_body_id = self._undesired_body_ids_tensor[body_subset_index].to(
             torch.int32
         )

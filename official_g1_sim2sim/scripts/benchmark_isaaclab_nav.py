@@ -26,6 +26,11 @@ parser.add_argument("--robot_asset", choices=("current_urdf", "official_usd"), d
 parser.add_argument("--unitree_model", type=Path, default=Path("/home/qc/qc/project/unitree_model"))
 parser.add_argument("--self_collisions", action="store_true")
 parser.add_argument("--external_contact_filter", action="store_true")
+parser.add_argument(
+    "--actuator_profile",
+    choices=("current", "policy_training_2025_07"),
+    default="current",
+)
 parser.add_argument("--output", type=Path, default=Path("runs/isaaclab_navigation_benchmark"))
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -39,6 +44,7 @@ import torch
 import isaaclab_nav
 from isaaclab_nav.benchmark import make_benchmark_terrain_cfg
 from isaaclab_nav.env_cfg import G1VisualNavigationEnvCfg
+from isaaclab_nav.walking_compatibility import apply_actuator_profile
 from navigation.scenarios import get_scenario, scenario_names
 
 
@@ -84,6 +90,7 @@ def _write_report(output: Path, rows: list[dict[str, object]], planner: str) -> 
         f"- Robot asset: `{args.robot_asset}`",
         f"- Self collisions: `{args.self_collisions}`",
         f"- External contact filter: `{args.external_contact_filter}`",
+        f"- Actuator profile: `{args.actuator_profile}`",
         f"- Completed static scenarios: {len(completed)}/{static_count}",
         f"- Static success rate: {successes}/{len(completed) if completed else 0}",
         "- `dynamic_obstacle` is not scored: Isaac Lab 2.3 RayCaster only sees the static terrain mesh; "
@@ -137,6 +144,7 @@ def main() -> None:
         cfg.robot.spawn.articulation_props.enabled_self_collisions = args.self_collisions
     if args.external_contact_filter:
         cfg.contact_sensor.filter_prim_paths_expr = ["/World/ground/terrain/mesh"]
+    apply_actuator_profile(cfg.robot, args.actuator_profile)
     cfg.scene.num_envs = len(static_scenes)
     cfg.sim.device = args.device
     cfg.terrain.terrain_generator = make_benchmark_terrain_cfg(static_scenes, args.seed)

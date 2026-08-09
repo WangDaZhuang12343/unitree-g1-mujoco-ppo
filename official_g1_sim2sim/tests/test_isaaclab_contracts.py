@@ -26,10 +26,22 @@ from isaaclab_nav.pretraining import (
     observation_moments,
     physical_command_to_normalized_action,
 )
+from isaaclab_nav.walking_compatibility import (
+    POLICY_RELEASE_COMMIT,
+    POLICY_TRAINING_EFFORT_LIMITS,
+    WALKING_ONNX_SHA256,
+)
 from navigation.scenarios import get_scenario, scenario_names
 
 
 class IsaacLabContractsTest(unittest.TestCase):
+    def test_walking_actuator_profile_is_versioned_to_released_policy(self):
+        self.assertEqual(
+            POLICY_TRAINING_EFFORT_LIMITS, {"legs": 300, "feet": 20, "arms": 300}
+        )
+        self.assertEqual(len(WALKING_ONNX_SHA256), 64)
+        self.assertEqual(POLICY_RELEASE_COMMIT[:8], "e3c0fe49")
+
     def test_filtered_contact_flat_index_recovers_body_axis(self):
         flat_index = torch.arange(12)
         actual = collision_body_subset_index(flat_index, num_filters=2, num_bodies=3)

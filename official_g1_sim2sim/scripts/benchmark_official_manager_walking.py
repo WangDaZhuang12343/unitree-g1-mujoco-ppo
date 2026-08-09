@@ -20,6 +20,12 @@ parser.add_argument("--duration", type=float, default=12.0)
 parser.add_argument("--warmup", type=float, default=2.0)
 parser.add_argument("--seed", type=int, default=23)
 parser.add_argument(
+    "--actuator_profile",
+    choices=("current", "policy_training_2025_07"),
+    default="current",
+    help="Use current Unitree limits or the actuator config present when the ONNX was published.",
+)
+parser.add_argument(
     "--walking_policy",
     type=Path,
     default=Path(
@@ -52,6 +58,7 @@ import torch
 import unitree_rl_lab.tasks  # noqa: F401 - registers the official task
 from g1_nav.walking_commands import COMMANDS
 from isaaclab_nav.walking import FrozenWalkingPolicy
+from isaaclab_nav.walking_compatibility import apply_actuator_profile
 
 RobotPlayEnvCfg = importlib.import_module(
     "unitree_rl_lab.tasks.locomotion.robots.g1.29dof.velocity_env_cfg"
@@ -81,6 +88,7 @@ def main() -> None:
     cfg.scene.num_envs = len(COMMANDS)
     cfg.sim.device = args.device
     cfg.scene.robot.spawn.usd_path = str(official_usd)
+    apply_actuator_profile(cfg.scene.robot, args.actuator_profile)
     cfg.scene.terrain.terrain_generator.num_rows = 1
     cfg.scene.terrain.terrain_generator.num_cols = 1
     cfg.scene.terrain.terrain_generator.curriculum = False
@@ -197,6 +205,7 @@ def main() -> None:
         "# Official ManagerBased Frozen Walking Command Matrix",
         "",
         f"- Clean inference: `{args.clean_inference}`",
+        f"- Actuator profile: `{args.actuator_profile}`",
         f"- Walking policy: `{walking_policy}`",
         f"- Official USD: `{official_usd}`",
         "",

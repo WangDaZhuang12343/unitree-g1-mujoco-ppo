@@ -4,7 +4,7 @@
 
 ## 结论
 
-“冻结DWA教师行为克隆 + actor-only PPO finetune”接入已经完成并通过技术验证，但当前策略没有通过部署验收。行为克隆、PPO微调、教师锚定和Isaac原生DAgger在10个静态确定性场景中均为`0/10`。更关键的是，冻结DWA直接驱动同一Isaac环境也只有`0/10`；MuJoCo同一Walking ONNX在28组命令中为`28/28`稳定，而Unitree官方ManagerBased Isaac任务也只有`23/28`。因此主要卡点已从“PPO训练速度或教师遗忘”收敛为“当前Isaac版本/资产中的Walking可执行域与MuJoCo DWA假设及策略训练artifact不兼容”。
+“冻结DWA教师行为克隆 + actor-only PPO finetune”接入已经完成并通过技术验证，但当前策略没有通过部署验收。行为克隆、PPO微调、教师锚定和Isaac原生DAgger在10个静态确定性场景中均为`0/10`。根因现已定位到官方Walking artifact合同漂移：ONNX首次发布时的执行器配置后来被替换，但ONNX哈希没有更新。恢复训练期执行器合同后，28组Walking矩阵由`23/28`恢复为`28/28`，冻结DWA由`0/10`恢复为`1/10`且10个场景均零碰撞、零跌倒。Walking接入卡点已经解除，但DWA教师上界仍不足以直接启动大规模训练。
 
 保留全部预训练/微调工具链，但暂停继续堆叠PPO轮数、锚定系数或同一DWA教师数据。在教师自身通过Isaac闭环验收前，这些实验没有形成可学习的成功上界。
 
@@ -116,12 +116,23 @@ reward由progress、success、collision、fall、clearance、action-rate和timeo
 | Direct环境官方USD，自碰撞开启，忽略接触终止 | 26/28 | 仅`lateral_n075`和`coupled_yn_wp`约11秒失败 |
 | Direct环境官方USD，自碰撞开启，仅过滤外部地形接触 | 26/28 | 与忽略接触结果一致，证明内部自碰撞不再被误判为障碍碰撞 |
 | 官方ManagerBasedRLEnv + 官方USD，干净推理 | 23/28 | 同样过冲且5组因bad orientation终止 |
+| 官方ManagerBased + 训练期执行器合同 | 28/28 | vx/vy/omega平均绝对误差降至0.042/0.017/0.026 |
+| Direct默认URDF + 训练期执行器合同 | 28/28 | 与官方USD结果一致，资产无需强制切换 |
 
 MuJoCo用同一ONNX完成28/28，说明策略文件本身没有损坏。官方USD相较当前URDF确实改善Isaac稳定域，但把完整冻结DWA benchmark切换到“官方USD + 自碰撞 + 外部接触过滤”后仍为`0/10`：8个场景发生真实外部碰撞、3个fall、2个timeout。因此不能仅凭26/28命令存活就把资产切换提升为生产默认。
 
 为排除Direct adapter的历史、动作时序或执行器应用差异，新增`benchmark_official_manager_walking.py`，直接实例化Unitree官方`RobotPlayEnvCfg`，向官方`base_velocity` command term写入同一28组物理命令，并把官方480维manager observation逐环境送入未改写ONNX。干净推理结果仍只有23/28：`forward_030`、`forward_045`、`lateral_n025`和两个负向`vy`耦合命令失败；全矩阵平均绝对速度误差约为`vx=0.197`、`vy=0.155`、`omega=0.085`。
 
-这项结果排除了“当前Direct adapter是主要失败源”的假设。剩余最可能原因是策略训练时的Isaac/PhysX/Unitree资产版本与当前Isaac Sim 5.1、Isaac Lab 2.3及仓库artifact不完全兼容，或发布策略本身在边界命令上没有足够裕量。当前不应通过修改ONNX、重排关节或继续PPO扩训来掩盖该兼容性问题。
+这项结果排除了“当前Direct adapter是主要失败源”的假设。进一步展开官方Git历史后，根因可以精确复现：
+
+- ONNX SHA256为`610c27e463a8f666aa50a06346678c00b4df3859f10b54bcc1f817c28251406f`，首次出现于`unitree_rl_lab`提交`e3c0fe49`（2025-07-03，README标注Isaac Sim 4.5 / Isaac Lab 2.0）。
+- 当时G1配置的腿/腰`effort_limit_sim=300`、手臂300、腿/手臂`velocity_limit_sim=100`；脚踝力矩20。
+- 2025-08-06的`a7c9efab`把执行器改为当前更硬件化的88/139/25等分组限制，但ONNX字节哈希保持不变。
+- 在当前Isaac Sim 5.1 / Isaac Lab 2.3中只恢复旧执行器合同，无需降级Isaac、无需修改ONNX，ManagerBased和Direct URDF均恢复28/28；因此主因是执行器合同漂移，不是Isaac 5.1本身。
+
+默认导航任务现使用显式版本名`policy_training_2025_07`匹配冻结ONNX，并保留`current`对照开关。这不是把旧限制宣称为真实硬件参数，而是保证冻结策略在Isaac中的训练合同一致；未来若获得按当前硬件化执行器重新训练的Walking策略，应随策略artifact成套切换。
+
+在兼容合同上重跑完整冻结DWA benchmark：`narrow_corridor`在13秒成功，总计`1/10`；其余9项timeout，所有10项均无碰撞、无跌倒。教师成功上界已经从零恢复为非零，但仍只覆盖单一场景，当前应先改善教师状态覆盖或依靠安全reward探索，不能把1/10误报为可部署导航。
 
 ### 关节顺序排除项
 
@@ -133,7 +144,7 @@ MuJoCo用同一ONNX完成28/28，说明策略文件本身没有损坏。官方US
 - `joint_ids_map=[0,6,12,1,...]`用于把策略/Articulation顺序转换到Unitree SDK或MuJoCo motor顺序；它不应再次应用到Isaac输入或输出。
 - 当前adapter直接读取Isaac joint tensors并直接写入29维target，正好复现训练合同。对其增加`joint_ids_map`会造成二次重排。
 
-所以目前没有证据表明左右不对称来自关节索引错误。更可能的剩余来源是URDF导入后的接触/惯量/执行器动态与Walking训练资产不完全一致，或策略在边界组合命令处本来就缺少稳定裕量。
+所以没有证据表明左右不对称来自关节索引错误。训练期执行器合同恢复后，原左右不对称和边界跌倒均消失，进一步支持执行器配置漂移结论。
 
 ## 新增工具
 
@@ -149,12 +160,12 @@ MuJoCo用同一ONNX完成28/28，说明策略文件本身没有损坏。官方US
 
 ## 决策与下一步
 
-不放弃当前分层PPO架构，也不改成29DOF端到端locomotion。应放弃的是“在当前教师和当前可执行域不变时继续纯PPO扩训”的实验路线，而不是PPO→Safety→Walking的工程边界。行为克隆warm start、DAgger和checkpoint接入能力继续保留，但当前所有模型都不得发布为deployable。
+不放弃当前分层PPO架构，也不改成29DOF端到端locomotion。Walking执行域问题已经通过版本化执行器合同修复；PPO→Safety→Walking边界、ONNX、Safety和DWA算法均未修改。旧训练数据来自错误执行器合同，不能继续作为主要数据源；当前所有已有模型仍不得发布为deployable。
 
 下一步应在同一架构内依次执行：
 
-1. 查明该ONNX的准确训练提交、Isaac Sim/Isaac Lab/PhysX版本及官方资产哈希，并在匹配版本复测官方ManagerBased矩阵；先解释版本兼容性和左右不对称，不改ONNX本体。
-2. 在不修改Safety和DWA算法的前提下，测量更细粒度的`vx/vy/omega`稳定包络，并将“规划命令是否超出实测Walking稳定域”作为接入兼容性结论。
-3. 只有在冻结DWA使用可执行命令后能在Isaac benchmark取得非零成功率，才重新生成教师数据并恢复BC/DAgger/PPO finetune。
-4. 恢复训练后，每个候选先跑约100轮，并用冻结benchmark callback而非训练reward决定是否继续。
-5. 在学习策略达到非零确定性成功率前，不替换MuJoCo稳定baseline；Isaac中的DWA fallback也不能宣称已通过部署验收。
+1. 用`policy_training_2025_07`重新采集Isaac教师和DAgger数据，禁止混用旧执行器合同下的数据。
+2. 保留冻结DWA算法不变，把其`1/10`视为warm-start而非最终上界；先做小规模BC和约100轮PPO安全探索。
+3. 每个候选必须跑冻结benchmark callback；只有成功率超过1/10且保持零碰撞趋势才继续扩训。
+4. `current`执行器配置只用于兼容性对照，除非获得与其成套训练的新Walking checkpoint，否则不用于本项目冻结ONNX训练。
+5. 在学习策略达到稳定非零成功率前，不替换MuJoCo稳定baseline；Isaac中的DWA fallback也不能宣称已通过部署验收。

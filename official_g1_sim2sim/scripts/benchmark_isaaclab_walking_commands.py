@@ -22,6 +22,11 @@ parser.add_argument("--unitree_model", type=Path, default=Path("/home/qc/qc/proj
 parser.add_argument("--self_collisions", action="store_true")
 parser.add_argument("--ignore_contacts", action="store_true")
 parser.add_argument("--external_contact_filter", action="store_true")
+parser.add_argument(
+    "--actuator_profile",
+    choices=("current", "policy_training_2025_07"),
+    default="current",
+)
 parser.add_argument("--output", type=Path, default=Path("runs/isaaclab_walking_commands"))
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
@@ -38,6 +43,7 @@ from isaaclab.utils.math import euler_xyz_from_quat
 from g1_nav.walking_commands import COMMANDS
 from isaaclab_nav.env_cfg import G1VisualNavigationEnvCfg
 from isaaclab_nav.pretraining import physical_command_to_normalized_action
+from isaaclab_nav.walking_compatibility import apply_actuator_profile
 
 
 def _flat_terrain() -> TerrainGeneratorCfg:
@@ -89,6 +95,7 @@ def main() -> None:
         cfg.contact_sensor.filter_prim_paths_expr = ["/World/ground/terrain/mesh"]
     if args.ignore_contacts:
         cfg.collision_force_threshold = float("inf")
+    apply_actuator_profile(cfg.robot, args.actuator_profile)
     cfg.terrain.terrain_generator = _flat_terrain()
     cfg.terrain.max_init_terrain_level = 0
     cfg.episode_length_s = args.duration + cfg.decimation * cfg.sim.dt
@@ -196,6 +203,7 @@ def main() -> None:
         f"- Self collisions: `{args.self_collisions}`",
         f"- Ignore contacts for termination: `{args.ignore_contacts}`",
         f"- External contact filter: `{args.external_contact_filter}`",
+        f"- Actuator profile: `{args.actuator_profile}`",
         "",
         "| Command | vx | vy | omega | Survived | End reason | Time (s) | Mean vx | Mean vy | Mean omega | RMSE norm |",
         "|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|",

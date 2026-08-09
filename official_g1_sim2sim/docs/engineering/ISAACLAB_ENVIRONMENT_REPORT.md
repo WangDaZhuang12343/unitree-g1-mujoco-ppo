@@ -64,7 +64,7 @@ OMNI_KIT_ACCEPT_EULA=YES python scripts/train_isaaclab_nav.py \
 ## 风险与下一步
 
 - 当前PPO仅完成接口和一次更新验证，不代表获得可部署导航成功率；正式长训练前仍须在Isaac中复现冻结的11类场景，并用Monte Carlo成功率和DWA同口径评估。
-- 冻结Walking Policy对纯侧移和原地转向响应弱，因此动作范围仍限制为`vx≤0.45`、`|vy|≤0.10`、`|omega|≤0.20`。
+- 冻结Walking Policy对纯侧移和原地转向响应弱。后续命令矩阵进一步证明`vx=0.45`以及负向`vy`组合在当前Isaac接入中并不稳定；这里的`vx≤0.45`、`|vy|≤0.10`、`|omega|≤0.20`只能视为接口边界，不能视为已验证的稳定可执行域。详见`ISAACLAB_PRETRAIN_FINETUNE_REPORT.md`。
 - GPU射线距离场和MuJoCo深度图/RANSAC Costmap不是逐像素同源；跨后端评估需保持地图范围、目标、成功、碰撞和Safety判据一致。
 - DWA为CPU异常路径，不应在大量环境中持续触发；否则会降低并行训练吞吐。
 - 正式训练建议先保持32环境，检查成功率、碰撞率和fallback率，再按显存余量扩大并行数；不要修改Walking Policy或Safety合同。

@@ -4,7 +4,9 @@
 
 ## 结论
 
-“冻结DWA教师行为克隆 + actor-only PPO finetune”接入已经完成并通过技术验证，但当前策略没有通过部署验收。DWA行为克隆、100轮微调和约500轮累计微调在10个静态确定性场景中均为`0/10`。因此保留这条路线和工具链，但不应继续仅靠增加训练时长；下一轮应先解决训练地形/冻结benchmark分布差异，以及reward上升却碰撞率不降的问题。
+“冻结DWA教师行为克隆 + actor-only PPO finetune”接入已经完成并通过技术验证，但当前策略没有通过部署验收。行为克隆、PPO微调、教师锚定和Isaac原生DAgger在10个静态确定性场景中均为`0/10`。更关键的是，冻结DWA直接驱动同一Isaac环境也只有`0/10`；因此主要卡点已从“PPO训练速度或教师遗忘”收敛为“MuJoCo DWA运动学假设与Isaac中的Walking实际可执行域不匹配”。
+
+保留全部预训练/微调工具链，但暂停继续堆叠PPO轮数、锚定系数或同一DWA教师数据。在教师自身通过Isaac闭环验收前，这些实验没有形成可学习的成功上界。
 
 Walking ONNX、SafetySystem、原DWA和MuJoCo baseline均未修改，在线边界仍为：
 
@@ -88,6 +90,50 @@ reward由progress、success、collision、fall、clearance、action-rate和timeo
 
 第11个`dynamic_obstacle`仍标记为`unsupported_dynamic_perception`，因为Isaac Lab 2.3 RayCaster不扫描运动刚体，不纳入成功率。
 
+## Isaac原生DAgger与教师上界核验（2026-08-09）
+
+采集器支持`--rollout_policy_onnx`和`--teacher_rollout_probability`：学习策略负责驱动环境，冻结DWA仅在学习策略实际访问的Isaac状态上生成纠正标签。这不改变在线架构，也不修改DWA算法。
+
+- 随机地形：10,000 samples。
+- 冻结benchmark地形：4,000 samples。
+- 合计14,000 samples、199 trajectories，teacher rollout概率为0.2。
+- 与原20,000条教师数据合并重新预训练后，validation MAE为`0.208869`。
+- DAgger BC v2确定性benchmark仍为`0/10`，9个场景记录碰撞。
+
+为判断失败来自学生还是教师，随后绕过PPO/BC，直接在完全相同的Isaac benchmark运行冻结DWA。结果仍为`0/10`：8个场景发生碰撞，`wide_wall`和`l_wall`运行到时限但未到达。使用新增终止诊断单测`single_obstacle`时，DWA没有碰撞，但在10.9秒跌倒，距目标仍有1.471米，最小净空0.152米。
+
+这构成当前最重要的反证：即使学生完全复现教师动作，也无法满足Isaac闭环成功合同。继续优化BC loss、DAgger采样量或PPO训练时长不能消除这个上界问题。
+
+## Frozen Walking可执行域诊断（2026-08-09）
+
+平地12秒命令矩阵保持同一个Frozen Walking ONNX、Isaac G1资产和Safety链路，只隔离上层导航规划：
+
+| 物理命令 | 结果 |
+|---|---|
+| stand | 稳定12秒 |
+| `vx=0.25` | 稳定12秒 |
+| `vx=0.45` | 4.8秒左膝触地 |
+| `vx=0.25, vy=0.10` | 稳定12秒 |
+| `vx=0.25, vy=-0.10` | 7.9秒跌倒 |
+| `vx=0.25, omega=0.20` | 稳定12秒 |
+| `vx=0.25, omega=-0.20` | 稳定12秒 |
+| `vx=0.25, vy=0.10, omega=0.20` | 稳定12秒 |
+| `vx=0.25, vy=-0.10, omega=-0.20` | 10.6秒右膝触地 |
+
+Walking在Isaac中存在明显的左右不对称，且DWA常用的最大前进速度不稳定。与此同时，Isaac教师标签大量饱和在最大`vx/vy/omega`。因此DWA认为可执行的速度集合大于Frozen Walking在当前Isaac接入中的实测稳定集合。
+
+### 关节顺序排除项
+
+已复核官方`deploy.yaml`、G1资产配置、策略训练Action/Observation配置和配置导出代码，没有发现Isaac adapter漏做reorder：
+
+- ONNX训练时的`JointPositionAction(joint_names=[".*"])`按Isaac Articulation原生顺序产生29维action。
+- `joint_pos_rel`、`joint_vel_rel`和`last_action`也使用相同的Articulation原生顺序。
+- `deploy.yaml`中的`default_joint_pos`、action scale/offset就是这个策略顺序。
+- `joint_ids_map=[0,6,12,1,...]`用于把策略/Articulation顺序转换到Unitree SDK或MuJoCo motor顺序；它不应再次应用到Isaac输入或输出。
+- 当前adapter直接读取Isaac joint tensors并直接写入29维target，正好复现训练合同。对其增加`joint_ids_map`会造成二次重排。
+
+所以目前没有证据表明左右不对称来自关节索引错误。更可能的剩余来源是URDF导入后的接触/惯量/执行器动态与Walking训练资产不完全一致，或策略在边界组合命令处本来就缺少稳定裕量。
+
 ## 新增工具
 
 - `scripts/collect_isaaclab_teacher.py`：从真实Isaac 483维观测采集冻结DWA标签，支持随机和benchmark地形。
@@ -99,12 +145,12 @@ reward由progress、success、collision、fall、clearance、action-rate和timeo
 
 ## 决策与下一步
 
-不建议放弃当前分层PPO架构，也不建议改成29DOF端到端locomotion。行为克隆warm start仍值得保留，因为它降低了100轮阶段的碰撞数，但它不是可直接迁移的现成导航checkpoint。
+不放弃当前分层PPO架构，也不改成29DOF端到端locomotion。应放弃的是“在当前教师和当前可执行域不变时继续纯PPO扩训”的实验路线，而不是PPO→Safety→Walking的工程边界。行为克隆warm start、DAgger和checkpoint接入能力继续保留，但当前所有模型都不得发布为deployable。
 
 下一步应在同一架构内依次执行：
 
-1. 把随机训练地形和10个冻结静态场景的采样比例显式记录并对齐，建立训练期间的独立benchmark callback。
-2. 分析成功、碰撞和超时episode的action/clearance轨迹，确认progress reward是否鼓励贴障抢进度。
-3. 在不修改Safety、Walking ONNX或DWA算法的前提下，调整上层课程与reward权重后做小规模消融。
-4. 每个候选最多先训约100轮，以冻结benchmark而不是训练reward决定是否继续。
-5. 在学习策略达到非零确定性成功率前，DWA继续作为默认规划器和RL fallback。
+1. 以官方Walking训练资产为基准，继续核对当前URDF导入的惯量、碰撞体、关节限位、执行器参数、physics material和仿真步长；先解释左右不对称，不改ONNX本体。
+2. 在不修改Safety和DWA算法的前提下，测量更细粒度的`vx/vy/omega`稳定包络，并将“规划命令是否超出实测Walking稳定域”作为接入兼容性结论。
+3. 只有在冻结DWA使用可执行命令后能在Isaac benchmark取得非零成功率，才重新生成教师数据并恢复BC/DAgger/PPO finetune。
+4. 恢复训练后，每个候选先跑约100轮，并用冻结benchmark callback而非训练reward决定是否继续。
+5. 在学习策略达到非零确定性成功率前，不替换MuJoCo稳定baseline；Isaac中的DWA fallback也不能宣称已通过部署验收。

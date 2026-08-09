@@ -26,6 +26,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--dwa_workers", type=int, default=8)
     parser.add_argument("--terrain", choices=("random", "benchmark"), default="random")
+    parser.add_argument("--rollout_policy_onnx", type=Path)
+    parser.add_argument("--teacher_rollout_probability", type=float, default=1.0)
     parser.add_argument("--output", type=Path, default=Path("datasets/isaaclab_dwa_teacher_v1.npz"))
     AppLauncher.add_app_launcher_args(parser)
     return parser.parse_args()
@@ -44,6 +46,10 @@ def run_collection(args: argparse.Namespace, simulation_app) -> None:
 
     if args.samples <= 0 or args.num_envs <= 0 or args.dwa_workers <= 0:
         raise ValueError("samples, num_envs, and dwa_workers must be positive")
+    if not 0.0 <= args.teacher_rollout_probability <= 1.0:
+        raise ValueError("teacher_rollout_probability must be in [0, 1]")
+    if args.rollout_policy_onnx is None and args.teacher_rollout_probability != 1.0:
+        raise ValueError("a mixed rollout requires --rollout_policy_onnx")
     cfg = G1VisualNavigationEnvCfg()
     cfg.scene.num_envs = args.num_envs
     cfg.sim.device = args.device
@@ -62,6 +68,17 @@ def run_collection(args: argparse.Namespace, simulation_app) -> None:
     observation, _ = env.reset(seed=args.seed)
     raw = env.unwrapped
     teacher = ParallelDwaTeacher(args.num_envs, args.dwa_workers)
+    rollout_session = None
+    rollout_input_name = None
+    if args.rollout_policy_onnx is not None:
+        if not args.rollout_policy_onnx.is_file():
+            raise FileNotFoundError(args.rollout_policy_onnx)
+        import onnxruntime as ort
+
+        rollout_session = ort.InferenceSession(
+            str(args.rollout_policy_onnx), providers=["CPUExecutionProvider"]
+        )
+        rollout_input_name = rollout_session.get_inputs()[0].name
     observations: list[np.ndarray] = []
     actions: list[np.ndarray] = []
     trajectory_ids: list[np.ndarray] = []
@@ -79,12 +96,25 @@ def run_collection(args: argparse.Namespace, simulation_app) -> None:
         ground_z_body = raw._terrain.env_origins[:, 2] - raw._robot.data.root_pos_w[:, 2]
         command = teacher.plan(points_body, ground_z_body, goal_body)
         action = physical_command_to_normalized_action(command)
+        rollout_action = action
+        if rollout_session is not None:
+            learner = rollout_session.run(
+                None,
+                {rollout_input_name: observation["policy"].detach().cpu().numpy()},
+            )[0]
+            if learner.shape != (args.num_envs, 3) or not np.isfinite(learner).all():
+                raise ValueError(f"rollout policy returned invalid action shape or values: {learner.shape}")
+            learner_action = torch.as_tensor(
+                learner, dtype=torch.float32, device=raw.device
+            ).clamp(-1.0, 1.0)
+            teacher_mask = torch.rand(args.num_envs, device=raw.device) < args.teacher_rollout_probability
+            rollout_action = torch.where(teacher_mask[:, None], action, learner_action)
         take = min(args.num_envs, args.samples - collected)
         observations.append(observation["policy"][:take].detach().cpu().numpy())
         actions.append(action[:take].detach().cpu().numpy())
         trajectory_ids.append(current_trajectory[:take].detach().cpu().numpy())
         collected += take
-        observation, _, terminated, truncated, _ = env.step(action)
+        observation, _, terminated, truncated, _ = env.step(rollout_action)
         reset_ids = torch.nonzero(terminated | truncated, as_tuple=False).flatten()
         for env_id in reset_ids.detach().cpu().tolist():
             current_trajectory[env_id] = next_trajectory
@@ -105,12 +135,18 @@ def run_collection(args: argparse.Namespace, simulation_app) -> None:
         trajectory_id=trajectory_array,
         seed=np.asarray(args.seed, dtype=np.int64),
         terrain=np.asarray(args.terrain),
+        rollout_policy=np.asarray(
+            str(args.rollout_policy_onnx.resolve()) if args.rollout_policy_onnx else "dwa_teacher"
+        ),
+        teacher_rollout_probability=np.asarray(args.teacher_rollout_probability, dtype=np.float32),
         format=np.asarray("g1_isaaclab_dwa_teacher_v1"),
     )
     print(
         "ISAACLAB_TEACHER_DATA_OK",
         {"samples": len(observation_array), "trajectories": int(np.unique(trajectory_array).size),
          "observation": observation_array.shape, "action": action_array.shape,
+         "rollout_policy": "learner_mixed" if rollout_session is not None else "dwa_teacher",
+         "teacher_rollout_probability": args.teacher_rollout_probability,
          "output": str(output)},
     )
     teacher.close()

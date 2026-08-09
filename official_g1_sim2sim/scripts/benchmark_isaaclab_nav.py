@@ -82,13 +82,14 @@ def _write_report(output: Path, rows: list[dict[str, object]], planner: str) -> 
         "- `dynamic_obstacle` is not scored: Isaac Lab 2.3 RayCaster only sees the static terrain mesh; "
         "scoring a moving rigid body as sensed would be invalid.",
         "",
-        "| Scenario | Status | Success | Survived | Collision | Time (s) | Final distance (m) | Min clearance (m) |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
+        "| Scenario | Status | Success | Survived | Collision | End reason | Collision body | Time (s) | Final distance (m) | Min clearance (m) |",
+        "|---|---|---:|---:|---:|---|---|---:|---:|---:|",
     ]
     for row in rows:
         lines.append(
             f"| {row['scenario']} | {row['status']} | {int(bool(row['success']))} | "
             f"{int(bool(row['survived']))} | {row['collision_count']} | "
+            f"{row['termination_reason']} | {row['collision_body']} | "
             f"{float(row['elapsed_sim_s']):.2f} | "
             f"{float(row['final_distance_m']):.3f} | {float(row['min_clearance_m']):.3f} |"
         )
@@ -106,6 +107,8 @@ def main() -> None:
         rows = [{
             "scenario": name, "status": "unsupported_dynamic_perception", "success": False,
             "reached": False, "survived": False, "collision_count": 0,
+            "termination_reason": "unsupported", "collision_body": "none",
+            "max_collision_force_n": 0.0,
             "elapsed_sim_s": 0.0, "final_distance_m": float("nan"),
             "min_clearance_m": float("nan"),
         } for name in requested]
@@ -136,6 +139,10 @@ def main() -> None:
     active = torch.ones(len(static_scenes), dtype=torch.bool, device=raw.device)
     done_reason = torch.zeros(len(static_scenes), dtype=torch.int8, device=raw.device)
     collision_count = torch.zeros(len(static_scenes), dtype=torch.int32, device=raw.device)
+    max_collision_force = torch.zeros(len(static_scenes), device=raw.device)
+    collision_body_id = torch.full(
+        (len(static_scenes),), -1, dtype=torch.int32, device=raw.device
+    )
     min_clearance = torch.full((len(static_scenes),), float("inf"), device=raw.device)
     last_distance = torch.full((len(static_scenes),), float("inf"), device=raw.device)
     elapsed_steps = torch.zeros(len(static_scenes), dtype=torch.int32, device=raw.device)
@@ -156,19 +163,28 @@ def main() -> None:
         last_distance[active] = extras["goal_distance"][active]
         elapsed_steps[active] += 1
         collision_count = torch.maximum(collision_count, extras["collision_count"])
+        stronger_contact = active & (extras["collision_force"] > max_collision_force)
+        max_collision_force[stronger_contact] = extras["collision_force"][stronger_contact]
+        collision_body_id[stronger_contact] = extras["collision_body_id"][stronger_contact]
         time_limit = elapsed_steps.float() * raw.step_dt >= durations
         newly_done = active & (terminated | truncated | time_limit)
-        done_reason[newly_done] = extras["termination_reason"][newly_done]
-        done_reason[newly_done & time_limit & (done_reason == 0)] = 4
+        step_reason = extras["termination_reason"].clone()
+        step_reason[time_limit & (step_reason == 0)] = 4
+        done_reason[newly_done] = step_reason[newly_done]
         active[newly_done] = False
 
     wall_s = time.perf_counter() - start
     rows = []
+    reason_names = {
+        0: "none", 1: "success", 2: "collision", 3: "fall", 4: "timeout", 5: "invalid"
+    }
+    body_names = raw._contact_sensor.body_names
     for env_id, name in enumerate(static_scenes):
         reason = int(done_reason[env_id])
         collisions = int(collision_count[env_id])
         reached = reason == 1 or float(last_distance[env_id]) <= cfg.success_radius
         survived = reason not in (2, 3, 5)
+        body_id = int(collision_body_id[env_id])
         rows.append({
             "scenario": name,
             "status": "completed",
@@ -176,6 +192,13 @@ def main() -> None:
             "reached": reached,
             "survived": survived,
             "collision_count": collisions,
+            "termination_reason": reason_names.get(reason, f"unknown_{reason}"),
+            "collision_body": (
+                body_names[body_id]
+                if collisions > 0 and 0 <= body_id < len(body_names)
+                else "none"
+            ),
+            "max_collision_force_n": float(max_collision_force[env_id]),
             "elapsed_sim_s": float(elapsed_steps[env_id]) * raw.step_dt,
             "final_distance_m": float(last_distance[env_id]),
             "min_clearance_m": float(min_clearance[env_id]),
@@ -185,6 +208,8 @@ def main() -> None:
             rows.append({
                 "scenario": name, "status": "unsupported_dynamic_perception", "success": False,
                 "reached": False, "survived": False, "collision_count": 0,
+                "termination_reason": "unsupported", "collision_body": "none",
+                "max_collision_force_n": 0.0,
                 "elapsed_sim_s": 0.0, "final_distance_m": float("nan"),
                 "min_clearance_m": float("nan"),
             })

@@ -74,6 +74,18 @@ reward由progress、success、collision、fall、clearance、action-rate和timeo
 
 安全reward 100轮的`single_obstacle`可做到零碰撞、最小净空0.292米，但在距目标1.274米时跌倒；`triple_obstacle`完整批测零碰撞并到达距目标0.502米，但仍未满足0.30米成功合同。该消融验证了reward漏洞的影响，但没有产生可部署策略。后续实验应以100轮checkpoint为早停基线，引入独立benchmark callback，而不是继续当前run。
 
+## PPO教师锚定消融（2026-08-09）
+
+训练入口新增可选的`--teacher_datasets`、`--bc_anchor_coef`和`--bc_anchor_batch_size`。每次PPO optimizer step从教师数据抽样，对同一个actor附加SmoothL1行为约束；critic和optimizer仍由PPO管理。该功能默认关闭，不改变原训练路径。
+
+| 100轮策略 | BC anchor系数 | Benchmark教师MAE | 静态成功 | 碰撞场景 |
+|---|---:|---|---:|---:|
+| 安全reward，无锚定 | 0 | `[0.812, 0.334, 0.234]` | 0/10 | 5/10 |
+| 安全reward，弱锚定 | 0.01 | `[0.277, 0.175, 0.134]` | 0/10 | 9/10 |
+| 安全reward，强锚定 | 0.1 | `[0.224, 0.171, 0.092]` | 0/10 | 9/10 |
+
+锚定成功阻止了actor离线漂移，却把闭环行为拉回DWA BC的失败模式。因此不再搜索锚定系数：主要缺口是教师数据没有覆盖学习策略实际访问的状态，而不是单纯遗忘教师。下一步应使用当前Isaac 483维观测做原生DAgger：由学习策略驱动环境，在其访问状态上请求冻结DWA纠正标签，再重新预训练/微调。
+
 第11个`dynamic_obstacle`仍标记为`unsupported_dynamic_perception`，因为Isaac Lab 2.3 RayCaster不扫描运动刚体，不纳入成功率。
 
 ## 新增工具

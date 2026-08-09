@@ -18,6 +18,7 @@ from isaaclab_nav.pretraining import (
     ACTOR_INPUT_DIM,
     NavigationActor,
     actor_from_rsl_rl_checkpoint,
+    load_teacher_datasets,
     load_actor_initialization,
     make_actor_checkpoint,
     normalized_action_to_physical_command,
@@ -84,6 +85,24 @@ class IsaacLabContractsTest(unittest.TestCase):
         expected = actor((observation - mean) / (std + 1.0e-2))
         torch.testing.assert_close(exported(observation), expected)
         self.assertEqual(metadata["iteration"], 99)
+
+    def test_teacher_dataset_loader_offsets_trajectory_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = []
+            for index in range(2):
+                path = Path(directory) / f"teacher_{index}.npz"
+                np.savez(
+                    path,
+                    format=np.asarray("g1_isaaclab_dwa_teacher_v1"),
+                    observation=np.full((2, ACTOR_INPUT_DIM), index, dtype=np.float32),
+                    action=np.zeros((2, 3), dtype=np.float32),
+                    trajectory_id=np.asarray([3, 4], dtype=np.int64),
+                )
+                paths.append(path)
+            observation, action, trajectory_id = load_teacher_datasets(paths)
+        self.assertEqual(observation.shape, (4, ACTOR_INPUT_DIM))
+        self.assertEqual(action.shape, (4, 3))
+        np.testing.assert_array_equal(trajectory_id.numpy(), [0, 1, 2, 3])
 
     def test_benchmark_contract_covers_all_frozen_scenarios(self):
         names = scenario_names()

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -15,6 +16,43 @@ ACTOR_HIDDEN_DIMS = (512, 256, 128)
 ACTOR_CHECKPOINT_FORMAT = "g1_isaaclab_navigation_actor_v1"
 RSL_RL_EXPORT_FORMAT = "g1_isaaclab_navigation_rsl_rl_export_v1"
 NORMALIZER_EPS = 1.0e-2
+
+
+def load_teacher_datasets(paths: list[str | Path]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Load and concatenate validated teacher datasets with globally unique trajectories."""
+
+    if not paths:
+        raise ValueError("at least one teacher dataset is required")
+    observations, actions, trajectory_ids = [], [], []
+    trajectory_offset = 0
+    for value in paths:
+        path = Path(value)
+        with np.load(path, allow_pickle=False) as payload:
+            if str(payload["format"]) != "g1_isaaclab_dwa_teacher_v1":
+                raise ValueError(f"unsupported dataset format in {path}")
+            observation = np.asarray(payload["observation"], dtype=np.float32)
+            action = np.asarray(payload["action"], dtype=np.float32)
+            ids = np.asarray(payload["trajectory_id"], dtype=np.int64)
+        if observation.ndim != 2 or observation.shape[1] != ACTOR_INPUT_DIM:
+            raise ValueError(f"expected observations (N,{ACTOR_INPUT_DIM}), got {observation.shape}")
+        if action.shape != (len(observation), ACTOR_OUTPUT_DIM):
+            raise ValueError(f"expected actions (N,{ACTOR_OUTPUT_DIM}), got {action.shape}")
+        if ids.shape != (len(observation),):
+            raise ValueError("trajectory_id must contain one value per sample")
+        if not np.isfinite(observation).all() or not np.isfinite(action).all():
+            raise ValueError(f"dataset contains non-finite values: {path}")
+        if len(ids) == 0:
+            raise ValueError(f"teacher dataset is empty: {path}")
+        ids = ids - ids.min() + trajectory_offset
+        trajectory_offset = int(ids.max()) + 1
+        observations.append(observation)
+        actions.append(action)
+        trajectory_ids.append(ids)
+    return (
+        torch.from_numpy(np.concatenate(observations)),
+        torch.from_numpy(np.concatenate(actions)),
+        torch.from_numpy(np.concatenate(trajectory_ids)),
+    )
 
 
 def physical_command_to_normalized_action(command: torch.Tensor) -> torch.Tensor:

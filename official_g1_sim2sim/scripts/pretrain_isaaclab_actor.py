@@ -7,7 +7,6 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch import nn
 
@@ -19,6 +18,7 @@ from isaaclab_nav.pretraining import (
     NORMALIZER_EPS,
     NavigationActor,
     NormalizedNavigationActor,
+    load_teacher_datasets,
     make_actor_checkpoint,
     observation_moments,
 )
@@ -37,39 +37,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_datasets(paths: list[Path]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    observations, actions, trajectory_ids = [], [], []
-    trajectory_offset = 0
-    for path in paths:
-        with np.load(path, allow_pickle=False) as payload:
-            if str(payload["format"]) != "g1_isaaclab_dwa_teacher_v1":
-                raise ValueError(f"unsupported dataset format in {path}")
-            observations.append(np.asarray(payload["observation"], dtype=np.float32))
-            actions.append(np.asarray(payload["action"], dtype=np.float32))
-            ids = np.asarray(payload["trajectory_id"], dtype=np.int64)
-            ids = ids - ids.min() + trajectory_offset
-            trajectory_ids.append(ids)
-            trajectory_offset = int(ids.max()) + 1
-    observation = torch.from_numpy(np.concatenate(observations))
-    action = torch.from_numpy(np.concatenate(actions))
-    trajectory_id = torch.from_numpy(np.concatenate(trajectory_ids))
-    if observation.ndim != 2 or observation.shape[1] != ACTOR_INPUT_DIM:
-        raise ValueError(f"expected observations (N,{ACTOR_INPUT_DIM}), got {tuple(observation.shape)}")
-    if action.shape != (len(observation), ACTOR_OUTPUT_DIM):
-        raise ValueError(f"expected actions (N,{ACTOR_OUTPUT_DIM}), got {tuple(action.shape)}")
-    if not torch.isfinite(observation).all() or not torch.isfinite(action).all():
-        raise ValueError("dataset contains non-finite values")
-    if trajectory_id.shape != (len(observation),):
-        raise ValueError("trajectory_id must contain one value per sample")
-    return observation, action, trajectory_id
-
-
 def main() -> None:
     args = parse_args()
     if args.epochs <= 0 or args.batch_size <= 0 or not 0.0 < args.validation_fraction < 1.0:
         raise ValueError("invalid training arguments")
     torch.manual_seed(args.seed)
-    observation, action, trajectory_id = load_datasets(args.datasets)
+    observation, action, trajectory_id = load_teacher_datasets(args.datasets)
     trajectories = torch.unique(trajectory_id)
     if len(trajectories) < 2:
         raise ValueError("at least two independent trajectories are required")

@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import csv
 import faulthandler
+import json
 import sys
 import time
 import traceback
+from dataclasses import asdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -29,7 +31,7 @@ parser.add_argument("--external_contact_filter", action="store_true")
 parser.add_argument(
     "--actuator_profile",
     choices=("current", "policy_training_2025_07"),
-    default="current",
+    default="policy_training_2025_07",
 )
 parser.add_argument("--output", type=Path, default=Path("runs/isaaclab_navigation_benchmark"))
 AppLauncher.add_app_launcher_args(parser)
@@ -43,6 +45,7 @@ import torch
 
 import isaaclab_nav
 from isaaclab_nav.benchmark import make_benchmark_terrain_cfg
+from isaaclab_nav.benchmark_gate import evaluate_benchmark
 from isaaclab_nav.env_cfg import G1VisualNavigationEnvCfg
 from isaaclab_nav.walking_compatibility import apply_actuator_profile
 from navigation.scenarios import get_scenario, scenario_names
@@ -112,6 +115,23 @@ def _write_report(output: Path, rows: list[dict[str, object]], planner: str) -> 
         "Success uses the frozen contract: within 0.30 m, survived, and zero collisions.",
     ]
     (output / "isaaclab_navigation_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if completed:
+        decision = evaluate_benchmark(rows)
+        gate_payload = {
+            "accepted": decision.accepted,
+            "reasons": decision.reasons,
+            "metrics": asdict(decision.metrics),
+            "contract": {
+                "minimum_completed_scenarios": 10,
+                "minimum_success_rate": 0.20,
+                "maximum_collision_rate": 0.20,
+                "maximum_fall_rate": 0.20,
+            },
+        }
+        (output / "checkpoint_gate.json").write_text(
+            json.dumps(gate_payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
 
 
 def main() -> None:

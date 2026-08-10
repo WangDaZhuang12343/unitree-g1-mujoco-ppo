@@ -41,6 +41,17 @@ MuJoCo mj_multiRay 深度相机
 - `isaaclab-port`已同步GitHub，本地与`origin/isaaclab-port`一致。
 - 生成数据、runs、logs和失败checkpoint均由Git忽略，没有发布不可部署模型。
 
+## Curriculum与自动评估准备（2026-08-10）
+
+- [x] 新增按环境独立升降级的terrain curriculum：连续3次成功升级，连续2次碰撞、跌倒或超时降级。
+- [x] 冻结Benchmark不参与课程调整，483维观测、3维动作、reward、done与success合同不变。
+- [x] 新增独立`RecoveryAugmentedTeacher`实验包装层；不修改冻结DWA，也不进入在线fallback。
+- [x] 教师数据记录`teacher_mode`，支持冻结DWA与恢复教师严格对照。
+- [x] Benchmark自动输出`checkpoint_gate.json`，按成功率、碰撞率、跌倒率拒绝无价值checkpoint。
+- [x] 当前开发机完成56项单元测试和全量Python编译检查。
+- [ ] RTX 4060训练机尚需执行32环境课程冒烟，验证PhysX terrain level切换与目标重置。
+- [ ] 实验教师必须先超过冻结DWA的1/10成功上界，才允许扩大BC/DAgger/PPO预算。
+
 ## 平地测试结果
 
 | 指令速度（米/秒） | 仿真时长（秒） | 前进距离（米） | 平均速度（米/秒） | 结果 |

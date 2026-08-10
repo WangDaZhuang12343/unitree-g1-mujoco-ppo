@@ -15,6 +15,7 @@ from isaaclab_nav.contracts import (
     UpperObservationHistory,
     collision_body_subset_index,
 )
+from isaaclab_nav.curriculum import NavigationCurriculumConfig, NavigationCurriculumState
 from isaaclab_nav.env_cfg import G1VisualNavigationEnvCfg
 from isaaclab_nav.fallback import BatchedDwaFallback
 from isaaclab_nav.perception import LocalDistanceFieldConfig, local_distance_field
@@ -33,6 +34,14 @@ class G1VisualNavigationEnv(DirectRLEnv):
         self._safety = BatchSafety(self.num_envs, self.device)
         self._upper_history = UpperObservationHistory(self.num_envs, self.device)
         self._dwa_fallback = BatchedDwaFallback(self.num_envs)
+        self._curriculum = NavigationCurriculumState(
+            self.num_envs,
+            self.device,
+            NavigationCurriculumConfig(
+                promotion_successes=cfg.curriculum_promotion_successes,
+                demotion_failures=cfg.curriculum_demotion_failures,
+            ),
+        )
         self._distance_field_cfg = LocalDistanceFieldConfig(
             rear_range=cfg.costmap_rear_range,
             front_range=cfg.costmap_front_range,
@@ -347,6 +356,16 @@ class G1VisualNavigationEnv(DirectRLEnv):
     def _reset_idx(self, env_ids: torch.Tensor | None):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self._robot._ALL_INDICES
+        if self.cfg.enable_navigation_curriculum and not self.cfg.benchmark_scenarios:
+            completed = self.episode_length_buf[env_ids] > 0
+            timeout = self.episode_length_buf[env_ids] >= self.max_episode_length - 1
+            move_up, move_down = self._curriculum.update(
+                env_ids,
+                completed,
+                self._success[env_ids],
+                self._collision[env_ids] | self._fall[env_ids] | timeout,
+            )
+            self._terrain.update_env_origins(env_ids, move_up, move_down)
         self._robot.reset(env_ids)
         super()._reset_idx(env_ids)
 
@@ -402,6 +421,10 @@ class G1VisualNavigationEnv(DirectRLEnv):
         frame = self._upper_frame()
         self._upper_history.reset(frame, env_ids)
         self.extras["log"] = {}
+        if self.cfg.enable_navigation_curriculum and not self.cfg.benchmark_scenarios:
+            self.extras["log"]["Curriculum/terrain_level"] = (
+                self._terrain.terrain_levels.float().mean()
+            )
         for name, values in self._episode_sums.items():
             self.extras["log"][f"Episode_Reward/{name}"] = values[env_ids].mean()
             values[env_ids] = 0.0

@@ -17,6 +17,7 @@ faulthandler.enable()
 from isaaclab.app import AppLauncher
 from isaaclab_nav.pretraining import physical_command_to_normalized_action
 from isaaclab_nav.teacher import ParallelDwaTeacher
+from isaaclab_nav.experimental_teacher import RecoveryAugmentedTeacher
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,6 +26,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_envs", type=int, default=8)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--dwa_workers", type=int, default=8)
+    parser.add_argument(
+        "--teacher_mode",
+        choices=("frozen_dwa", "recovery_dwa"),
+        default="frozen_dwa",
+        help="recovery_dwa is experimental and never changes the online fallback",
+    )
     parser.add_argument("--terrain", choices=("random", "benchmark"), default="random")
     parser.add_argument("--rollout_policy_onnx", type=Path)
     parser.add_argument("--teacher_rollout_probability", type=float, default=1.0)
@@ -67,7 +74,12 @@ def run_collection(args: argparse.Namespace, simulation_app) -> None:
     env = gym.make(isaaclab_nav.TASK_ID, cfg=cfg)
     observation, _ = env.reset(seed=args.seed)
     raw = env.unwrapped
-    teacher = ParallelDwaTeacher(args.num_envs, args.dwa_workers)
+    frozen_teacher = ParallelDwaTeacher(args.num_envs, args.dwa_workers)
+    teacher = (
+        RecoveryAugmentedTeacher(frozen_teacher, args.num_envs, raw.device)
+        if args.teacher_mode == "recovery_dwa"
+        else frozen_teacher
+    )
     rollout_session = None
     rollout_input_name = None
     if args.rollout_policy_onnx is not None:
@@ -139,6 +151,7 @@ def run_collection(args: argparse.Namespace, simulation_app) -> None:
             str(args.rollout_policy_onnx.resolve()) if args.rollout_policy_onnx else "dwa_teacher"
         ),
         teacher_rollout_probability=np.asarray(args.teacher_rollout_probability, dtype=np.float32),
+        teacher_mode=np.asarray(args.teacher_mode),
         walking_actuator_profile=np.asarray(cfg.walking_actuator_profile),
         format=np.asarray("g1_isaaclab_dwa_teacher_v2"),
     )
@@ -147,6 +160,7 @@ def run_collection(args: argparse.Namespace, simulation_app) -> None:
         {"samples": len(observation_array), "trajectories": int(np.unique(trajectory_array).size),
          "observation": observation_array.shape, "action": action_array.shape,
          "rollout_policy": "learner_mixed" if rollout_session is not None else "dwa_teacher",
+         "teacher_mode": args.teacher_mode,
          "walking_actuator_profile": cfg.walking_actuator_profile,
          "teacher_rollout_probability": args.teacher_rollout_probability,
          "output": str(output)},

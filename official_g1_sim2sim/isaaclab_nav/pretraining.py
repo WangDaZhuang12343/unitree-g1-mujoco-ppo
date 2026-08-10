@@ -29,6 +29,7 @@ def load_teacher_datasets(
         raise ValueError("at least one teacher dataset is required")
     observations, actions, trajectory_ids = [], [], []
     dataset_profiles: set[str] = set()
+    teacher_modes: set[str] = set()
     trajectory_offset = 0
     for value in paths:
         path = Path(value)
@@ -39,6 +40,11 @@ def load_teacher_datasets(
             if dataset_format == TEACHER_DATASET_FORMAT_V2:
                 profile = str(payload["walking_actuator_profile"])
                 dataset_profiles.add(profile)
+                # Datasets created before the experimental teacher field are
+                # frozen-DWA data by construction.
+                teacher_modes.add(
+                    str(payload["teacher_mode"]) if "teacher_mode" in payload else "frozen_dwa"
+                )
             elif expected_actuator_profile is not None:
                 raise ValueError(f"legacy dataset lacks actuator profile metadata: {path}")
             observation = np.asarray(payload["observation"], dtype=np.float32)
@@ -61,6 +67,8 @@ def load_teacher_datasets(
         trajectory_ids.append(ids)
     if len(dataset_profiles) > 1:
         raise ValueError(f"teacher datasets mix actuator profiles: {sorted(dataset_profiles)}")
+    if len(teacher_modes) > 1:
+        raise ValueError(f"teacher datasets mix teacher modes: {sorted(teacher_modes)}")
     if expected_actuator_profile is not None and dataset_profiles != {expected_actuator_profile}:
         raise ValueError(
             f"expected actuator profile {expected_actuator_profile!r}, got {sorted(dataset_profiles)}"

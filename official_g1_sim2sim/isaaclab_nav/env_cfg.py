@@ -176,6 +176,11 @@ class G1VisualNavigationEnvCfg(DirectRLEnvCfg):
     # only the terrain generator; the navigation/walking architecture is shared.
     benchmark_scenarios: tuple[str, ...] = ()
     benchmark_seed: int = 7
+    # Random training begins at terrain row zero and advances only after
+    # sustained successful episodes. Frozen benchmark terrain never uses this.
+    enable_navigation_curriculum: bool = True
+    curriculum_promotion_successes: int = 3
+    curriculum_demotion_failures: int = 2
 
     # A collision must cost more than all progress available in the longest
     # 6.5 m frozen benchmark scene. Otherwise rushing toward the goal and
@@ -191,6 +196,8 @@ class G1VisualNavigationEnvCfg(DirectRLEnvCfg):
 
     def __post_init__(self):
         apply_actuator_profile(self.robot, self.walking_actuator_profile)
+        if self.enable_navigation_curriculum and not self.benchmark_scenarios:
+            self.terrain.max_init_terrain_level = 0
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         if self.decimation % self.walking_decimation:
             raise ValueError("upper decimation must be a multiple of walking_decimation")

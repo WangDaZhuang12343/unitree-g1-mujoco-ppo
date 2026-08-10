@@ -1,12 +1,12 @@
 # 项目进度
 
-更新时间：2026-08-05 17:04 CST
+更新时间：2026-08-10 CST
 
 ## 阶段总结
 
-当前已完成从“官方 G1 平地行走策略验证”到“纯仿真深度视觉自主绕障”的首个闭环。系统不重新训练底层步态，而是用仿真深度相机感知障碍，经局部代价地图和 DWA 规划生成速度指令，再交给 Unitree 官方 ONNX 策略驱动 29 个关节行走。
+当前已完成MuJoCo稳定视觉导航baseline，并完成Isaac Sim 5.1 + Isaac Lab 2.3的32环境GPU并行接入。系统不重新训练底层步态，而是由上层导航策略生成速度指令，再经Safety交给冻结的Unitree官方ONNX驱动29个关节。
 
-当前代码全部为纯 MuJoCo 仿真，不初始化 DDS、不发布 `LowCmd`、不连接真实机器人，也不修改办公电脑的系统 Python 环境。
+MuJoCo baseline继续冻结保留；Isaac分支只用于仿真训练与评估。两条链路均不初始化DDS、不发布`LowCmd`、不连接真实机器人。
 
 ### 当前数据流
 
@@ -36,11 +36,10 @@ MuJoCo mj_multiRay 深度相机
 
 ## 当前运行状态
 
-- 旧自研 PPO 课程训练已经完成，当前没有训练进程。
-- 官方策略批量测试已经完成，当前没有 MuJoCo 可视化进程。
-- 端口 9000 当前未监听，Galbot 网页工作台没有启动。
-- 当前没有 DDS 控制器、`LowCmd` 发布器或实机通信进程。
-- GitHub 主分支已同步到提交 `ba8acf0`，本地与 `origin/main` 一致。
+- 当前没有Isaac训练、MuJoCo可视化、DDS控制器或实机通信进程。
+- `main`继续作为MuJoCo稳定baseline；开发位于`isaaclab-port`。
+- `isaaclab-port`已同步GitHub，本地与`origin/isaaclab-port`一致。
+- 生成数据、runs、logs和失败checkpoint均由Git忽略，没有发布不可部署模型。
 
 ## 平地测试结果
 
@@ -124,7 +123,7 @@ MuJoCo mj_multiRay 深度相机
 8. [x] 增加多障碍、窄通道、宽墙、凹形墙和动态障碍首次基线；多次成功率统计留给 Priority 4。
 9. [x] 将仿真几何 ID 地面剔除替换为可迁移的地面平面估计。
 10. [x] 增加深度图、点云、代价地图和 DWA 路径的可视化监控，降低调试黑盒感。
-11. [ ] 在带 NVIDIA GPU 的训练机上评估 Isaac Lab 高度扫描观测和地形课程。
+11. [x] 在RTX 4060 Laptop上完成Isaac Sim 5.1 / Isaac Lab 2.3、32环境GPU并行和训练链路评估。
 12. [ ] 仿真验收稳定后，再单独设计带急停、限幅和吊装保护的实机部署方案。
 
 ## Navigation Benchmark 阶段成果
@@ -222,3 +221,47 @@ MuJoCo mj_multiRay 深度相机
 - [x] 单/双障碍最终距离改善约0.79 m/1.37 m，但闭环仍为0/3成功。
 - [x] 继续保持DWA为默认规划器，三个学习模型均明确标记为不可部署。
 - [ ] 下一步需要更强的闭环训练框架，不应继续仅靠线性/随机特征堆叠。
+
+## Isaac Lab迁移与PPO阶段（2026-08-10）
+
+### 已完成接入
+
+- [x] Isaac Sim 5.1、Isaac Lab 2.3、PhysX GPU并行环境可运行。
+- [x] 保持分层合同：`PPO 483→3 → Safety → Frozen Walking ONNX 480→29 → G1 29DOF`。
+- [x] 32环境GPU并行、RayCaster、Safety、冻结DWA fallback和RSL-RL checkpoint接入完成。
+- [x] actor observation固定为`4×120 + goal[3] = 483`，action严格为`[vx, vy, omega]`。
+- [x] Walking、Safety、DWA算法和MuJoCo baseline均未修改。
+
+### Walking兼容性根因与修复
+
+- [x] 同一Walking ONNX在MuJoCo 28组命令中为28/28稳定；当前Isaac执行器配置仅23/28且速度明显过冲。
+- [x] 追溯ONNX SHA256 `610c27e...51406f`首次发布提交`e3c0fe49`，确认上游后来修改执行器限制但没有更新ONNX。
+- [x] 增加版本化`policy_training_2025_07`执行器合同；当前Isaac 5.1下ManagerBased和Direct URDF均恢复28/28。
+- [x] vx/vy/omega平均绝对误差由约0.197/0.155/0.085降至0.042/0.017/0.026。
+- [x] 默认Isaac导航任务已匹配冻结ONNX训练合同，并保留`current`配置作为兼容性对照。
+
+### 冻结benchmark结果
+
+| 候选 | 静态成功 | 碰撞记录 | 结论 |
+|---|---:|---:|---|
+| 修复前Isaac冻结DWA | 0/10 | 8/10 | Walking合同错误，不能作为教师上界 |
+| 修复后Isaac冻结DWA | 1/10 | 0/10 | Walking稳定；教师安全但成功覆盖不足 |
+| 兼容环境2k BC | 1/10 | 4/10 | 小数据闭环安全性不足 |
+| 兼容环境10k BC | 1/10 | 8/10 | validation MAE 0.0949，但闭环未改善 |
+| 10k BC + 100轮安全PPO | 0/10 | 9/10 | 76,800 timesteps后退化，不可部署 |
+
+### 数据与发布边界
+
+- [x] 教师数据格式升级为`g1_isaaclab_dwa_teacher_v2`并强制记录执行器合同。
+- [x] BC、PPO教师锚定和ONNX导出记录/校验`walking_actuator_profile`，禁止混用旧环境数据。
+- [x] 14项Isaac合同测试、Python编译、32环境GPU smoke和Git差异检查通过。
+- [x] 所有失败BC/PPO模型保持本地Git忽略，未标记或发布为deployable。
+
+### 当前决策
+
+- [x] 停止继续堆叠同分布DWA教师数据、BC轮数和当前PPO轮数。
+- [x] DWA继续作为默认规划器与RL fallback，MuJoCo稳定baseline不替换。
+- [ ] 下一轮上层RL需要新的由易到难成功课程或更强成功教师，但仍只输出`vx, vy, omega`。
+- [ ] 新候选必须超过冻结DWA的1/10且显著降低碰撞，才能进入扩训或部署评估。
+
+详细证据与实验参数见`docs/engineering/ISAACLAB_PRETRAIN_FINETUNE_REPORT.md`。
